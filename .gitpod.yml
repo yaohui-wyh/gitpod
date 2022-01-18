@@ -36,6 +36,9 @@ tasks:
   - name: TypeScript
     before: scripts/branch-namespace.sh
     init: yarn --network-timeout 100000 && yarn build
+  - name: TEST
+    init: echo "VISIBLE $VISIBLE, CENSORED $CENSORED"
+    command: echo "VISIBLE $VISIBLE, CENSORED $CENSORED"
   - name: Go
     init: leeway exec --filter-type go -v -- go mod verify
     openMode: split-right
