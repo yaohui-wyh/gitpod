@@ -25,23 +25,9 @@ ports:
 # Dev Theia
   - port: 13444
 tasks:
-  - name: Add Harvester kubeconfig
-    command: |
-      ./dev/preview/download-and-merge-harvester-kubeconfig.sh
-      exit 0
-  - name: Java
-    init: |
-      leeway exec --package components/supervisor-api/java:lib --package components/gitpod-protocol/java:lib -- ./gradlew build
-      leeway exec --package components/ide/jetbrains/backend-plugin:plugin -- ./gradlew buildPlugin
-  - name: TypeScript
-    before: scripts/branch-namespace.sh
-    init: yarn --network-timeout 100000 && yarn build
   - name: TEST
     init: echo "VISIBLE $VISIBLE, CENSORED $CENSORED"
     command: echo "VISIBLE $VISIBLE, CENSORED $CENSORED"
-  - name: Go
-    init: leeway exec --filter-type go -v -- go mod verify
-    openMode: split-right
 vscode:
   extensions:
     - bajdzis.vscode-database
