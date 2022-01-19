@@ -34,13 +34,15 @@ interface Props {
 export function WorkspaceEntry({ desc, model, isAdmin, stopWorkspace }: Props) {
     const [isDeleteModalVisible, setDeleteModalVisible] = useState(false);
     const [isRenameModalVisible, setRenameModalVisible] = useState(false);
+    const [isSSHModalVisible, setSSHModalVisible] = useState(false);
+
     const renameInputRef = useRef<HTMLInputElement>(null);
     const [errorMessage, setErrorMessage] = useState('');
     const state: WorkspaceInstancePhase = desc.latestInstance?.status?.phase || 'stopped';
     const currentBranch = desc.latestInstance?.status.repo?.branch || Workspace.getBranchName(desc.workspace) || '<unknown>';
     const ws = desc.workspace;
     const [workspaceDescription, setWsDescription] = useState(ws.description);
-
+    const [sshCommand] = useState(`ssh ${ws.id}:${desc.latestInstance?.status.ownerToken}@${desc.latestInstance?.ideUrl.replace("https://", "")}`);
     const startUrl = new GitpodHostUrl(window.location.href).with({
         pathname: '/start/',
         hash: '#' + ws.id
@@ -66,6 +68,10 @@ export function WorkspaceEntry({ desc, model, isAdmin, stopWorkspace }: Props) {
         menuEntries.push({
             title: 'Stop',
             onClick: () => stopWorkspace(ws.id)
+        });
+        menuEntries.push({
+            title: 'SSH',
+            onClick: () => setSSHModalVisible(true)
         });
     }
     menuEntries.push(
@@ -184,6 +190,20 @@ export function WorkspaceEntry({ desc, model, isAdmin, stopWorkspace }: Props) {
             <div className="flex justify-end mt-6">
                 <button className="secondary" onClick={() => setRenameModalVisible(false)}>Cancel</button>
                 <button className="ml-2" type="submit" onClick={updateWorkspaceDescription}>Update Description</button>
+            </div>
+        </Modal>
+
+        <Modal visible={isSSHModalVisible} onClose={() => {setSSHModalVisible(false); return true}} onEnter={() => { return isSSHModalVisible }}>
+            <h3 className="mb-4">Connect to SSH</h3>
+            <div className="border-t border-b border-gray-200 dark:border-gray-800 -mx-6 px-6 py-4 space-y-2">
+
+                <input autoFocus className="w-full truncate" type="text" defaultValue={sshCommand}/>
+                <div className="mt-1">
+                    <p className="text-gray-500 whitespace-normal">Copy this command and paste in your terminal, you will get a direct SSH connection</p>
+                </div>
+            </div>
+            <div className="flex justify-end mt-6">
+                <button className="secondary" onClick={() => setSSHModalVisible(false)}>Close</button>
             </div>
         </Modal>
     </Item>;
