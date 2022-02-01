@@ -4,6 +4,94 @@
  * See License-AGPL.txt in the project root for license information.
  */
 
+//#region setTimeout
+const setIntervalMap = new Map<string, { key: string, stack: string, count: number, parallelCount: number }>();
+const timerIdMap = new Map<NodeJS.Timer, { key: string, stack: string, count: number, parallelCount: number }>();
+
+const originalSetInterval = setInterval;
+(setInterval as any) = function <TArgs extends any[]>(callback: (...args: TArgs) => void, ms?: number, ...args: TArgs): NodeJS.Timer {
+    const stack = new Error().stack || "unknown stack";
+    const key = stack.split('\n')[2];
+
+    const getCounter = () => {
+        let counter = setIntervalMap.get(key);
+        if (counter === undefined) {
+            counter = { key, stack, count: 0, parallelCount: 0 };
+            setIntervalMap.set(key, counter);
+        }
+        return counter;
+    };
+
+    const wrapper = (...args: TArgs) => {
+        const counter = getCounter();
+        counter.parallelCount = counter.parallelCount + 1;
+        callback(...args);
+        counter.parallelCount = counter.parallelCount - 1;
+    };
+
+    // increment counter on setInterval
+    const counter = getCounter();
+    counter.count = counter.count + 1;
+
+    const timerId = originalSetInterval(wrapper, ms, ...args)
+    timerIdMap.set(timerId, counter);
+
+    return timerId;
+};
+const originalClearInterval = clearInterval;
+(clearInterval as any) = function (timerId: NodeJS.Timer): void {
+    originalClearInterval(timerId);
+
+    const counter = timerIdMap.get(timerId);
+    if (counter) {
+        // decrement counter on clearInterval
+        counter.count = Math.max(counter.count - 1, 0);
+    }
+};
+
+const setTimeoutMap = new Map<string, { key: string, stack: string, count: number }>();
+const timeoutIdMap = new Map<NodeJS.Timeout, { key: string, stack: string, count: number }>();
+
+const originalSetTimeout = setTimeout;
+(setTimeout as any) = function<TArgs extends any[]>(callback: (...args: TArgs) => void, ms?: number, ...args: TArgs) {
+    const stack = new Error().stack || "unknown stack";
+    const key = stack.split('\n')[2];
+
+    const getCounter = () => {
+        let counter = setTimeoutMap.get(key);
+        if (counter === undefined) {
+            counter = { key, stack, count: 0 };
+            setTimeoutMap.set(key, counter);
+        }
+        return counter;
+    };
+    const wrapper = (...args: TArgs): void => {
+        // decrement counter when the callback starts
+        const counter = getCounter();
+        counter.count = Math.max(counter.count - 1, 0);
+
+        callback(...args);
+    };
+
+    // increment counter on setTimeout
+    const counter = getCounter();
+    counter.count = counter.count + 1;
+
+    const timeoutId = originalSetTimeout(wrapper, ms, ...args)
+    timeoutIdMap.set(timeoutId, counter);
+
+    return timeoutId;
+};
+const originalClearTimeout = clearTimeout;
+(clearTimeout as any) = function clearTimeout(timeoutId: NodeJS.Timeout): void {
+    originalClearTimeout(timeoutId);
+
+    const counter = timeoutIdMap.get(timeoutId);
+    if (counter) {
+        counter.count = Math.max(counter.count - 1, 0);
+    }
+};
+//#endregion
 
 //#region heapdump
 /**
@@ -61,6 +149,7 @@ import { Container } from 'inversify';
 import { Server } from "./server"
 import { log, LogrusLogLevel } from '@gitpod/gitpod-protocol/lib/util/logging';
 import { TracingManager } from '@gitpod/gitpod-protocol/lib/util/tracing';
+import { setIntervalCount, setIntervalParallelCallbackCount, setTimeoutCount } from './prometheus-metrics';
 if (process.env.NODE_ENV === 'development') {
     require('longjohn');
 }
@@ -83,6 +172,34 @@ export async function start(container: Container) {
 
     await server.init(app);
     await server.start(port);
+
+    //#region setTimeout/setInterval metrics
+    (async () => {
+        const clean = (key: string): string => {
+            return key.substring("    at ".length);
+        };
+
+        while (true) {
+            await new Promise(resolve => originalSetTimeout(resolve, 5000));
+            // let total = 0;
+            // let totalParallel = 0;
+            for (const [k, v] of setIntervalMap.entries()) {
+                const key = clean(k);
+                // console.log(`STACK: ${v.count}/${v.parallelCount} | ${k}`, { stack: v.stack });
+                setIntervalCount(key, v.count);
+                setIntervalParallelCallbackCount(key, v.parallelCount);
+                // total += v.count;
+                // totalParallel += v.parallelCount;
+            }
+            // console.log(`STACK SUMMARY: ${total}/${totalParallel} total #########################################`);
+
+            for (const [k, v] of setTimeoutMap.entries()) {
+                const key = clean(k);
+                setTimeoutCount(key, v.count);
+            }
+        }
+    })()
+    //#endregion
 
     process.on('SIGTERM', async () => {
         log.info('SIGTERM received, stopping');

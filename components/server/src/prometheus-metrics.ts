@@ -124,3 +124,36 @@ const gitpodVersionInfo = new prometheusClient.Gauge({
 export function setGitpodVersion(gitpod_version: string){
     gitpodVersionInfo.set({gitpod_version}, 1)
 }
+
+const setTimeoutGauge = new prometheusClient.Gauge({
+    name: 'gitpod_server_set_timeout_current',
+    help: "Currently non-completed setTimeout registrations per callsite",
+    labelNames: ["callsite"],
+    registers: [prometheusClient.register]
+});
+
+export function setTimeoutCount(callsite: string, count: number){
+    setTimeoutGauge.set({callsite}, count);
+}
+
+const setIntervalGauge = new prometheusClient.Gauge({
+    name: 'gitpod_server_set_interval_current',
+    help: "Currently setInterval registrations per callsite",
+    labelNames: ["callsite"],
+    registers: [prometheusClient.register]
+});
+
+export function setIntervalCount(callsite: string, count: number){
+    setIntervalGauge.set({callsite}, count);
+}
+
+const setIntervalParallelCallbackGauge = new prometheusClient.Gauge({
+    name: 'gitpod_server_set_interval_parallel_callback',
+    help: "Currently running setInterval callbacks per callsite",
+    labelNames: ["callsite"],
+    registers: [prometheusClient.register]
+});
+
+export function setIntervalParallelCallbackCount(callsite: string, count: number){
+    setIntervalParallelCallbackGauge.set({callsite}, count);
+}
