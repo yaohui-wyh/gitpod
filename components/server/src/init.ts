@@ -8,10 +8,22 @@
 const setIntervalMap = new Map<string, { key: string, stack: string, count: number, parallelCount: number }>();
 const timerIdMap = new Map<NodeJS.Timer, { key: string, stack: string, count: number, parallelCount: number }>();
 
+const stackToKey = (stack: string): string => {
+    const parts = stack.split('\n');
+    if (parts.length < 3) {
+        return stack;
+    }
+    let key = parts[2].substring("    at ".length);
+    if (key.startsWith("repeated ") && parts.length >= 6) {
+        key = `repeated: ${parts[5]}`;
+    }
+    return key;
+};
+
 const originalSetInterval = setInterval;
 (setInterval as any) = function <TArgs extends any[]>(callback: (...args: TArgs) => void, ms?: number, ...args: TArgs): NodeJS.Timer {
     const stack = new Error().stack || "unknown stack";
-    const key = stack.split('\n')[2];
+    const key = stackToKey(stack);
 
     const getCounter = () => {
         let counter = setIntervalMap.get(key);
@@ -55,7 +67,7 @@ const timeoutIdMap = new Map<NodeJS.Timeout, { key: string, stack: string, count
 const originalSetTimeout = setTimeout;
 (setTimeout as any) = function<TArgs extends any[]>(callback: (...args: TArgs) => void, ms?: number, ...args: TArgs) {
     const stack = new Error().stack || "unknown stack";
-    const key = stack.split('\n')[2];
+    const key = stackToKey(stack);
 
     const getCounter = () => {
         let counter = setTimeoutMap.get(key);
@@ -175,17 +187,12 @@ export async function start(container: Container) {
 
     //#region setTimeout/setInterval metrics
     (async () => {
-        const clean = (key: string): string => {
-            return key.substring("    at ".length);
-        };
-
         while (true) {
             await new Promise(resolve => originalSetTimeout(resolve, 5000));
             // let total = 0;
             // let totalParallel = 0;
-            for (const [k, v] of setIntervalMap.entries()) {
-                const key = clean(k);
-                // console.log(`STACK: ${v.count}/${v.parallelCount} | ${k}`, { stack: v.stack });
+            for (const [key, v] of setIntervalMap.entries()) {
+                // console.log(`STACK: ${v.count}/${v.parallelCount} | ${key}`, { stack: v.stack });
                 setIntervalCount(key, v.count);
                 setIntervalParallelCallbackCount(key, v.parallelCount);
                 // total += v.count;
@@ -193,10 +200,13 @@ export async function start(container: Container) {
             }
             // console.log(`STACK SUMMARY: ${total}/${totalParallel} total #########################################`);
 
-            for (const [k, v] of setTimeoutMap.entries()) {
-                const key = clean(k);
+            // let setTimeoutTotal = 0;
+            for (const [key, v] of setTimeoutMap.entries()) {
+                // console.log(`STACK: ${v.count} | ${key}`, { stack: v.stack });
                 setTimeoutCount(key, v.count);
+                // setTimeoutTotal += v.count;
             }
+            // console.log(`STACK SUMMARY: ${setTimeoutTotal} total #########################################`);
         }
     })()
     //#endregion
