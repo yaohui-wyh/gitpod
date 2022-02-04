@@ -23,13 +23,13 @@ import { AccountStatement, CreditAlert, Subscription } from "@gitpod/gitpod-prot
 import { EligibilityService } from "../user/eligibility-service";
 import { AccountStatementProvider } from "../user/account-statement-provider";
 import { GithubUpgradeURL, PlanCoupon } from "@gitpod/gitpod-protocol/lib/payment-protocol";
-import { AssigneeIdentityIdentifier, TeamSubscription, TeamSubscriptionSlot, TeamSubscriptionSlotResolved } from "@gitpod/gitpod-protocol/lib/team-subscription-protocol";
+import { AssigneeIdentityIdentifier, TeamSubscription, TeamSubscription2, TeamSubscriptionSlot, TeamSubscriptionSlotResolved } from "@gitpod/gitpod-protocol/lib/team-subscription-protocol";
 import { Plans } from "@gitpod/gitpod-protocol/lib/plans";
 import * as pThrottle from "p-throttle";
 import { formatDate } from "@gitpod/gitpod-protocol/lib/util/date-time";
 import { FindUserByIdentityStrResult } from "../../../src/user/user-service";
 import { Accounting, AccountService, SubscriptionService, TeamSubscriptionService } from "@gitpod/gitpod-payment-endpoint/lib/accounting";
-import { AccountingDB, TeamSubscriptionDB, EduEmailDomainDB } from "@gitpod/gitpod-db/lib";
+import { AccountingDB, TeamSubscriptionDB, TeamSubscription2DB, EduEmailDomainDB } from "@gitpod/gitpod-db/lib";
 import { ChargebeeProvider, UpgradeHelper } from "@gitpod/gitpod-payment-endpoint/lib/chargebee";
 import { ChargebeeCouponComputer } from "../user/coupon-computer";
 import { ChargebeeService } from "../user/chargebee-service";
@@ -59,6 +59,7 @@ export class GitpodServerEEImpl extends GitpodServerImpl {
     @inject(AccountingDB) protected readonly accountingDB: AccountingDB;
     @inject(EduEmailDomainDB) protected readonly eduDomainDb: EduEmailDomainDB;
 
+    @inject(TeamSubscription2DB) protected readonly teamSubscription2DB: TeamSubscription2DB;
     @inject(TeamSubscriptionDB) protected readonly teamSubscriptionDB: TeamSubscriptionDB;
     @inject(TeamSubscriptionService) protected readonly teamSubscriptionService: TeamSubscriptionService;
 
@@ -954,6 +955,44 @@ export class GitpodServerEEImpl extends GitpodServerImpl {
         }
     }
 
+    async teamCheckout(ctx: TraceContext, teamId: string, planId: string): Promise<{}> {
+        traceAPIParams(ctx, { teamId, planId });
+
+        const user = this.checkUser('teamCheckout');
+
+        const team = await this.teamDB.findTeamById(teamId);
+        if (!team) {
+            throw new ResponseError(ErrorCodes.NOT_FOUND, "Team not found");
+        }
+        const members = await this.teamDB.findMembersByTeam(team.id);
+        await this.guardAccess({ kind: "team", subject: team, members }, "update");
+
+        // TODO(janx): If student team plan, check that every member is eligible
+
+        const coupon = await this.findAvailableCouponForPlan(user, planId);
+
+        const email = User.getPrimaryEmail(user);
+        return new Promise((resolve, reject) => {
+            this.chargebeeProvider.hosted_page.checkout_new({
+                customer: {
+                    id: 'team:' + team.id,
+                    email,
+                },
+                subscription: {
+                    plan_id: planId,
+                    plan_quantity: members.length,
+                    coupon,
+                }
+            }).request((error: any, result: any) => {
+                if (error) {
+                    reject(error);
+                    return;
+                }
+                resolve(result.hosted_page);
+            });
+        });
+    }
+
     protected async findAvailableCouponForPlan(user: User, planId: string): Promise<string | undefined> {
         const couponNames = await this.couponComputer.getAvailableCouponIds(user);
         const chargbeeCoupons = await Promise.all(couponNames.map(c => new Promise<chargebee.Coupon | undefined>((resolve, reject) => this.chargebeeProvider.coupon.retrieve(c).request((err, res) => {
@@ -1074,9 +1113,20 @@ export class GitpodServerEEImpl extends GitpodServerImpl {
         return chargebeeSubscriptionId;
     }
 
-    // Team Subscriptions
+    // Team Subscriptions 2
+    async getTeamSubscription(ctx: TraceContext, teamId: string): Promise<TeamSubscription2 | undefined> {
+        this.checkUser('getTeamSubscription');
+        await this.guardTeamOperation(teamId, "get");
+        return this.teamSubscription2DB.findForTeam(teamId, new Date().toISOString());
+    }
+
+    protected async updateTeamSubscriptionQuantity(ctx: TraceContext, teamId: string): Promise<void> {
+        // TODO(janx)
+    }
+
+    // Team Subscriptions (legacy)
     async tsGet(ctx: TraceContext): Promise<TeamSubscription[]> {
-        const user = this.checkUser('getTeamSubscriptions');
+        const user = this.checkUser('tsGet');
         return this.teamSubscriptionDB.findTeamSubscriptionsForUser(user.id, new Date().toISOString());
     }
 

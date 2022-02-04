@@ -27,7 +27,7 @@ import { LicenseService } from './license-protocol';
 import { Emitter } from './util/event';
 import { AccountStatement, CreditAlert } from './accounting-protocol';
 import { GithubUpgradeURL, PlanCoupon } from './payment-protocol';
-import { TeamSubscription, TeamSubscriptionSlot, TeamSubscriptionSlotResolved } from './team-subscription-protocol';
+import { TeamSubscription, TeamSubscription2, TeamSubscriptionSlot, TeamSubscriptionSlotResolved } from './team-subscription-protocol';
 import { RemotePageMessage, RemoteTrackMessage, RemoteIdentifyMessage } from './analytics';
 import { IDEServer } from './ide-protocol';
 import { InstallationAdminSettings, TelemetryData } from './installation-admin-protocol';
@@ -224,6 +224,7 @@ export interface GitpodServer extends JsonRpcServer<GitpodClient>, AdminServer, 
     getChargebeeSiteId(): Promise<string>;
     createPortalSession(): Promise<{}>;
     checkout(planId: string, planQuantity?: number): Promise<{}>;
+    teamCheckout(teamId: string, planId: string): Promise<{}>;
     getAvailableCoupons(): Promise<PlanCoupon[]>;
     getAppliedCoupons(): Promise<PlanCoupon[]>;
 
@@ -235,6 +236,7 @@ export interface GitpodServer extends JsonRpcServer<GitpodClient>, AdminServer, 
     subscriptionCancel(subscriptionId: string): Promise<void>;
     subscriptionCancelDowngrade(subscriptionId: string): Promise<void>;
 
+    getTeamSubscription(teamId: string): Promise<TeamSubscription2 | undefined>;
     tsGet(): Promise<TeamSubscription[]>;
     tsGetSlots(): Promise<TeamSubscriptionSlotResolved[]>;
     tsGetUnassignedSlot(teamSubscriptionId: string): Promise<TeamSubscriptionSlot | undefined>
