@@ -11,13 +11,13 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
-	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 	yaml "gopkg.in/yaml.v2"
 
@@ -33,9 +33,20 @@ var (
 	Version = ""
 )
 
+const Code = "/ide/bin/gitpod-code"
+
 func main() {
 	log.Init(ServiceName, Version, true, false)
 	startTime := time.Now()
+
+	go func() {
+		log.Info("run code")
+		err := runCode()
+		if err != nil {
+			log.WithError(err).Error("run code failed")
+		}
+	}()
+
 	log.Info("wait until content available")
 
 	// wait until content ready
@@ -46,18 +57,16 @@ func main() {
 	}
 	log.WithField("cost", time.Now().Local().Sub(startTime).Milliseconds()).Info("content available")
 
-	code := "/ide/bin/gitpod-code"
-	// start code server with --install-extension flag
-	args := []string{code, "--start-server"}
+	// install extension with id
+	args := []string{}
+	// install extension with filepath and builtin extension
+	argsPath := []string{}
 
-	if os.Getenv("SUPERVISOR_DEBUG_ENABLE") == "true" {
-		args = append(args, "--inspect", "--log=trace")
-	}
 	wsContextUrl := wsInfo.GetWorkspaceContextUrl()
 	if ctxUrl, err := url.Parse(wsContextUrl); err == nil {
 		if ctxUrl.Host == "github.com" {
 			log.Info("ws context url is from github.com, install builtin extension github.vscode-pull-request-github")
-			args = append(args, "--install-builtin-extension", "github.vscode-pull-request-github")
+			argsPath = append(argsPath, "--install-builtin-extension", "github.vscode-pull-request-github")
 		}
 	} else {
 		log.WithError(err).WithField("wsContextUrl", wsContextUrl).Error("parse ws context url failed")
@@ -69,23 +78,47 @@ func main() {
 		log.WithError(err).Error("get extensions failed")
 	}
 	for _, ext := range extensions {
-		if _, ok := uniqMap[ext]; ok {
+		if _, ok := uniqMap[ext.Location]; ok {
 			continue
 		}
-		uniqMap[ext] = struct{}{}
-		args = append(args, "--install-extension", ext)
+		uniqMap[ext.Location] = struct{}{}
+		if ext.IsUrl {
+			args = append(args, "--install-extension", ext.Location)
+		} else {
+			argsPath = append(argsPath, "--install-extension", ext.Location)
+		}
 	}
 
+	log.WithField("ext", args).WithField("extPath", argsPath).WithField("cost", time.Now().Local().Sub(startTime).Milliseconds()).Info("parse extensions")
+
+	// install path extension first
+	// see https://github.com/microsoft/vscode/issues/143617#issuecomment-1047881213
+	cmd := exec.Command(Code, argsPath...)
+	cmd.Stderr = os.Stderr
+	cmd.Stdout = os.Stdout
+	if err := cmd.Run(); err != nil {
+		log.WithError(err).Error("install extPath failed")
+	}
+	cmd = exec.Command(Code, args...)
+	cmd.Stderr = os.Stderr
+	cmd.Stdout = os.Stdout
+	if err := cmd.Run(); err != nil {
+		log.WithError(err).Error("install ext failed")
+	}
+
+	log.Info("extensions installed")
+}
+
+func runCode() error {
+	args := []string{}
+	if os.Getenv("SUPERVISOR_DEBUG_ENABLE") == "true" {
+		args = append(args, "--inspect", "--log=trace")
+	}
 	args = append(args, os.Args...)
-	log.WithField("code", code).WithField("args", args).
-		WithField("cost", time.Now().Local().Sub(startTime).Milliseconds()).
-		Info("run cmd")
-	args = append([]string{code}, args...)
-
-	// use unix.Exec to replace the calling executable in the process tree
-	if err := unix.Exec(code, args, os.Environ()); err != nil {
-		log.WithError(err).Error("unix exec code failed")
-	}
+	cmd := exec.Command(Code, args...)
+	cmd.Stderr = os.Stderr
+	cmd.Stdout = os.Stdout
+	return cmd.Run()
 }
 
 func resolveWorkspaceInfo(ctx context.Context) (*supervisor.ContentStatusResponse, *supervisor.WorkspaceInfoResponse, error) {
@@ -122,7 +155,12 @@ func resolveWorkspaceInfo(ctx context.Context) (*supervisor.ContentStatusRespons
 	return nil, nil, errors.New("failed with attempt 10 times")
 }
 
-func getExtensions(repoRoot string) (extensions []string, err error) {
+type Extension struct {
+	IsUrl    bool
+	Location string
+}
+
+func getExtensions(repoRoot string) (extensions []Extension, err error) {
 	if repoRoot == "" {
 		err = errors.New("repoRoot is empty")
 		return
@@ -160,12 +198,18 @@ func getExtensions(repoRoot string) (extensions []string, err error) {
 					return
 				}
 				extensionsMu.Lock()
-				extensions = append(extensions, location)
+				extensions = append(extensions, Extension{
+					IsUrl:    true,
+					Location: location,
+				})
 				extensionsMu.Unlock()
 			}(ext)
 		} else {
 			extensionsMu.Lock()
-			extensions = append(extensions, lowerCaseExtension)
+			extensions = append(extensions, Extension{
+				IsUrl:    false,
+				Location: lowerCaseExtension,
+			})
 			extensionsMu.Unlock()
 		}
 	}

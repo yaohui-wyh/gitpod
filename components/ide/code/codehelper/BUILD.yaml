@@ -14,3 +14,4 @@ packages:
       - components/common-go:lib
     config:
       packaging: app
+      buildCommand: ["go", "build", "-trimpath", "-ldflags", "-buildid= -w -s -X 'github.com/gitpod-io/gitpod/code/codehelper.Version=commit-${__git_commit}'"]
