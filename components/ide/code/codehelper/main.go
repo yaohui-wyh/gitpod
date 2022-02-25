@@ -38,16 +38,25 @@ const Code = "/ide/bin/gitpod-code"
 
 func main() {
 	log.Init(ServiceName, Version, true, false)
+
+	go installExtensions()
+
+	log.Info("run code")
+	args := []string{}
+	if os.Getenv("SUPERVISOR_DEBUG_ENABLE") == "true" {
+		args = append(args, "--inspect", "--log=trace")
+	}
+	args = append(args, os.Args[1:]...)
+	cmd := exec.Command(Code, args...)
+	cmd.Stderr = os.Stderr
+	cmd.Stdout = os.Stdout
+	if err := cmd.Run(); err != nil {
+		log.WithError(err).Error("run code failed")
+	}
+}
+
+func installExtensions() {
 	startTime := time.Now()
-
-	go func() {
-		log.Info("run code")
-		err := runCode()
-		if err != nil {
-			log.WithError(err).Error("run code failed")
-		}
-	}()
-
 	log.Info("wait until content available")
 
 	// wait until content ready
@@ -127,18 +136,6 @@ func main() {
 	}
 
 	log.Info("extensions installed")
-}
-
-func runCode() error {
-	args := []string{}
-	if os.Getenv("SUPERVISOR_DEBUG_ENABLE") == "true" {
-		args = append(args, "--inspect", "--log=trace")
-	}
-	args = append(args, os.Args[1:]...)
-	cmd := exec.Command(Code, args...)
-	cmd.Stderr = os.Stderr
-	cmd.Stdout = os.Stdout
-	return cmd.Run()
 }
 
 func resolveWorkspaceInfo(ctx context.Context) (*supervisor.ContentStatusResponse, *supervisor.WorkspaceInfoResponse, error) {
