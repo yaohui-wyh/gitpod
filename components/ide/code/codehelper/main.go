@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -97,8 +98,13 @@ func main() {
 	log.WithField("ext", args).WithField("extPath", argsPath).WithField("cost", time.Now().Local().Sub(startTime).Milliseconds()).Info("parse extensions")
 
 	// ensure extensions install in correct dir
-	argsPath = append(argsPath, os.Args...)
-	args = append(args, os.Args...)
+	argsPath = append(argsPath, os.Args[1:]...)
+	args = append(args, os.Args[1:]...)
+
+	// wait until ext host ready
+	log.Info("wait extension host ready")
+	waitPort(23000)
+	log.Info("extension host ready, start install extensions")
 
 	// install path extension first
 	// see https://github.com/microsoft/vscode/issues/143617#issuecomment-1047881213
@@ -128,7 +134,7 @@ func runCode() error {
 	if os.Getenv("SUPERVISOR_DEBUG_ENABLE") == "true" {
 		args = append(args, "--inspect", "--log=trace")
 	}
-	args = append(args, os.Args...)
+	args = append(args, os.Args[1:]...)
 	cmd := exec.Command(Code, args...)
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stdout
@@ -266,4 +272,29 @@ func downloadExtension(url string) (location string, err error) {
 		WithField("cost", time.Now().Local().Sub(start).Milliseconds()).
 		Info("download extension success")
 	return
+}
+
+func waitPort(port int) {
+	// Expected format: local port (in hex), remote address (irrelevant here), connection state ("0A" is "TCP_LISTEN")
+	pattern, err := regexp.Compile(fmt.Sprintf(":[0]*%X \\w+:\\w+ 0A ", port))
+	if err != nil {
+		log.Fatal("cannot compile regexp pattern")
+	}
+
+	fmt.Printf("Awaiting port %d... ", port)
+	for {
+		tcp, err := os.ReadFile("/proc/net/tcp")
+		if err != nil {
+			log.Fatalf("cannot read /proc/net/tcp: %s", err)
+		}
+
+		tcp6, err := os.ReadFile("/proc/net/tcp6")
+		if err != nil {
+			log.Fatalf("cannot read /proc/net/tcp6: %s", err)
+		}
+		if pattern.MatchString(string(tcp)) || pattern.MatchString(string(tcp6)) {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
 }
