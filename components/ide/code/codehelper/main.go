@@ -59,14 +59,17 @@ func main() {
 
 	// install extension with id
 	args := []string{}
+	argsRun := false
 	// install extension with filepath and builtin extension
 	argsPath := []string{}
+	argsPathRun := false
 
 	wsContextUrl := wsInfo.GetWorkspaceContextUrl()
 	if ctxUrl, err := url.Parse(wsContextUrl); err == nil {
 		if ctxUrl.Host == "github.com" {
 			log.Info("ws context url is from github.com, install builtin extension github.vscode-pull-request-github")
 			argsPath = append(argsPath, "--install-builtin-extension", "github.vscode-pull-request-github")
+			argsPathRun = true
 		}
 	} else {
 		log.WithError(err).WithField("wsContextUrl", wsContextUrl).Error("parse ws context url failed")
@@ -84,26 +87,37 @@ func main() {
 		uniqMap[ext.Location] = struct{}{}
 		if ext.IsUrl {
 			args = append(args, "--install-extension", ext.Location)
+			argsRun = true
 		} else {
 			argsPath = append(argsPath, "--install-extension", ext.Location)
+			argsPathRun = true
 		}
 	}
 
 	log.WithField("ext", args).WithField("extPath", argsPath).WithField("cost", time.Now().Local().Sub(startTime).Milliseconds()).Info("parse extensions")
 
+	// ensure extensions install in correct dir
+	argsPath = append(argsPath, os.Args...)
+	args = append(args, os.Args...)
+
 	// install path extension first
 	// see https://github.com/microsoft/vscode/issues/143617#issuecomment-1047881213
-	cmd := exec.Command(Code, argsPath...)
-	cmd.Stderr = os.Stderr
-	cmd.Stdout = os.Stdout
-	if err := cmd.Run(); err != nil {
-		log.WithError(err).Error("install extPath failed")
+	if argsPathRun {
+		cmd := exec.Command(Code, argsPath...)
+		cmd.Stderr = os.Stderr
+		cmd.Stdout = os.Stdout
+		if err := cmd.Run(); err != nil {
+			log.WithError(err).Error("install extPath failed")
+		}
 	}
-	cmd = exec.Command(Code, args...)
-	cmd.Stderr = os.Stderr
-	cmd.Stdout = os.Stdout
-	if err := cmd.Run(); err != nil {
-		log.WithError(err).Error("install ext failed")
+
+	if argsRun {
+		cmd := exec.Command(Code, args...)
+		cmd.Stderr = os.Stderr
+		cmd.Stdout = os.Stdout
+		if err := cmd.Run(); err != nil {
+			log.WithError(err).Error("install ext failed")
+		}
 	}
 
 	log.Info("extensions installed")
