@@ -7,7 +7,7 @@
 import { injectable, inject } from "inversify";
 import { GitpodServerImpl, traceAPIParams, traceWI, censor } from "../../../src/workspace/gitpod-server-impl";
 import { TraceContext } from "@gitpod/gitpod-protocol/lib/util/tracing";
-import { GitpodServer, GitpodClient, AdminGetListRequest, User, Team, TeamMemberInfo, AdminGetListResult, Permission, AdminBlockUserRequest, AdminModifyRoleOrPermissionRequest, RoleOrPermission, AdminModifyPermanentWorkspaceFeatureFlagRequest, UserFeatureSettings, AdminGetWorkspacesRequest, WorkspaceAndInstance, GetWorkspaceTimeoutResult, WorkspaceTimeoutDuration, WorkspaceTimeoutValues, SetWorkspaceTimeoutResult, WorkspaceContext, CreateWorkspaceMode, WorkspaceCreationResult, PrebuiltWorkspaceContext, CommitContext, PrebuiltWorkspace, WorkspaceInstance, EduEmailDomain, ProviderRepository, Queue, PrebuildWithStatus, CreateProjectParams, Project, StartPrebuildResult, ClientHeaderFields, Workspace, FindPrebuildsParams, TeamMemberRole } from "@gitpod/gitpod-protocol";
+import { GitpodServer, GitpodClient, AdminGetListRequest, User, Team, TeamMemberInfo, AdminGetListResult, Permission, AdminBlockUserRequest, AdminModifyRoleOrPermissionRequest, RoleOrPermission, AdminModifyPermanentWorkspaceFeatureFlagRequest, UserFeatureSettings, AdminGetWorkspacesRequest, WorkspaceAndInstance, GetWorkspaceTimeoutResult, WorkspaceTimeoutDuration, WorkspaceTimeoutValues, SetWorkspaceTimeoutResult, WorkspaceContext, CreateWorkspaceMode, WorkspaceCreationResult, PrebuiltWorkspaceContext, CommitContext, PrebuiltWorkspace, WorkspaceInstance, EduEmailDomain, ProviderRepository, Queue, PrebuildWithStatus, CreateProjectParams, Project, StartPrebuildResult, ClientHeaderFields, Workspace, FindPrebuildsParams, TeamMemberRole, WORKSPACE_TIMEOUT_DEFAULT_SHORT } from "@gitpod/gitpod-protocol";
 import { ResponseError } from "vscode-jsonrpc";
 import { TakeSnapshotRequest, AdmissionLevel, ControlAdmissionRequest, StopWorkspacePolicy, DescribeWorkspaceRequest, SetTimeoutRequest } from "@gitpod/ws-manager/lib";
 import { ErrorCodes } from "@gitpod/gitpod-protocol/lib/messaging/error";
@@ -27,7 +27,7 @@ import { AssigneeIdentityIdentifier, TeamSubscription, TeamSubscriptionSlot, Tea
 import { Plans } from "@gitpod/gitpod-protocol/lib/plans";
 import * as pThrottle from "p-throttle";
 import { formatDate } from "@gitpod/gitpod-protocol/lib/util/date-time";
-import { FindUserByIdentityStrResult } from "../../../src/user/user-service";
+import { FindUserByIdentityStrResult, UserService } from "../../../src/user/user-service";
 import { Accounting, AccountService, SubscriptionService, TeamSubscriptionService } from "@gitpod/gitpod-payment-endpoint/lib/accounting";
 import { AccountingDB, TeamSubscriptionDB, EduEmailDomainDB } from "@gitpod/gitpod-db/lib";
 import { ChargebeeProvider, UpgradeHelper } from "@gitpod/gitpod-payment-endpoint/lib/chargebee";
@@ -74,6 +74,8 @@ export class GitpodServerEEImpl extends GitpodServerImpl {
     @inject(Config) protected readonly config: Config;
 
     @inject(SnapshotService) protected readonly snapshotService: SnapshotService;
+
+    @inject(UserService) protected readonly userService: UserService;
 
     initialize(client: GitpodClient | undefined, user: User | undefined, accessGuard: ResourceAccessGuard, clientMetadata: ClientMetadata, connectionCtx: TraceContext | undefined, clientHeaderFields: ClientHeaderFields): void {
         super.initialize(client, user, accessGuard, clientMetadata, connectionCtx, clientHeaderFields);
@@ -211,14 +213,14 @@ export class GitpodServerEEImpl extends GitpodServerImpl {
         await Promise.all(instancesWithReset.map(i => {
             const req = new SetTimeoutRequest();
             req.setId(i.id);
-            req.setDuration(defaultTimeout);
+            req.setDuration(this.userService.workspaceTimeoutToDuration(defaultTimeout));
 
             return client.setTimeout(ctx, req);
         }));
 
         const req = new SetTimeoutRequest();
         req.setId(runningInstance.id);
-        req.setDuration(duration);
+        req.setDuration(this.userService.workspaceTimeoutToDuration(duration));
         await client.setTimeout(ctx, req);
 
         return {
@@ -241,7 +243,7 @@ export class GitpodServerEEImpl extends GitpodServerImpl {
         const runningInstance = await this.workspaceDb.trace(ctx).findRunningInstance(workspaceId);
         if (!runningInstance) {
             log.warn({ userId: user.id, workspaceId }, 'Can only get keep-alive for running workspaces');
-            return { duration: "30m", canChange };
+            return { duration: WORKSPACE_TIMEOUT_DEFAULT_SHORT, canChange };
         }
         await this.guardAccess({ kind: "workspaceInstance", subject: runningInstance, workspace: workspace }, "get");
 
@@ -250,10 +252,9 @@ export class GitpodServerEEImpl extends GitpodServerImpl {
 
         const client = await this.workspaceManagerClientProvider.get(runningInstance.region);
         const desc = await client.describeWorkspace(ctx, req);
-        const duration = desc.getStatus()!.getSpec()!.getTimeout() as WorkspaceTimeoutDuration;
+        const duration = this.userService.durationToWorkspaceTimeout(desc.getStatus()!.getSpec()!.getTimeout());
         return { duration, canChange };
     }
-
 
     public async isPrebuildDone(ctx: TraceContext, pwsId: string): Promise<boolean> {
         traceAPIParams(ctx, { pwsId });
