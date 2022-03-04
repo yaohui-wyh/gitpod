@@ -495,6 +495,10 @@ func removeVolume(pod *corev1.Pod, name string) {
 }
 
 func (m *Manager) createWorkspaceContainer(startContext *startWorkspaceContext) (*corev1.Container, error) {
+	m.Config.Container.Workspace.Limits = config.ResourceConfiguration{
+		Memory: "10Gi",
+	}
+
 	limits, err := m.Config.Container.Workspace.Limits.ResourceList()
 	if err != nil {
 		return nil, xerrors.Errorf("cannot parse workspace container limits: %w", err)

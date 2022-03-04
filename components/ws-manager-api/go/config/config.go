@@ -303,6 +303,14 @@ func (r *ResourceConfiguration) ResourceList() (corev1.ResourceList, error) {
 		if v == "" {
 			continue
 		}
+		// if k == corev1.ResourceMemory {
+		// 	q, err := resource.ParseQuantity("10G")
+		// 	if err != nil {
+		// 		return nil, xerrors.Errorf("%s: %w", k, err)
+		// 	}
+		// 	l[k] = q
+		// 	continue
+		// }
 
 		q, err := resource.ParseQuantity(v)
 		if err != nil {
