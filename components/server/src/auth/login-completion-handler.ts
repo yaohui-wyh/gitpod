@@ -82,8 +82,8 @@ export class LoginCompletionHandler {
 
             increaseLoginCounter("succeeded", authHost);
 
-            /** no await */ trackLogin(user, request, authHost, this.analytics)
-                .catch(err => log.error({ userId: user.id }, err));
+            /** no await */ trackLogin(user, request, authHost, this.analytics,this.subscriptionService)
+            .catch(err => log.error({ userId: user.id }, err));
         }
 
         // Check for and automatically subscribe to Professional OpenSource subscription
