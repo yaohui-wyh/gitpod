@@ -270,7 +270,14 @@ https://*.*.{$GITPOD_DOMAIN} {
 	import ssl_configuration
 	import debug_headers
 
-	@workspace_blobserve header_regexp host Host ^blobserve.ws(?P<location>-[a-z0-9]+)?.{$GITPOD_DOMAIN}
+	# foreign content route:
+	# - blobserve => used to serve vscode main source files
+	# - (?:v--)?[0-9a-v]+ => used to serve vscode webview and webworker resources of the form
+	# 	https://{{hash_base_32}}.<cluster>.<gitpod_domain> or https://v--{{hash_base_32}}.<cluster>.<gitpod_domain>
+	# 	e.g:
+	# 	https://0d9rkrj560blqb5s07q431ru9mhg19k1k4bqgd1dbprtgmt7vuhk.ws-us34xl.gitpod.io (for webviews)
+	# 	https://v--0d9rkrj560blqb5s07q431ru9mhg19k1k4bqgd1dbprtgmt7vuhk.ws-us34xl.gitpod.io (for webworker)
+	@workspace_blobserve header_regexp host Host ^blobserve|(?:v--)?[0-9a-v]+.ws(?P<location>-[a-z0-9]+)?.{$GITPOD_DOMAIN}
 	handle @workspace_blobserve {
 		gitpod.cors_origin {
 			base_domain {$GITPOD_DOMAIN}
@@ -286,8 +293,7 @@ https://*.*.{$GITPOD_DOMAIN} {
 		}
 	}
 
-	# remove (webview-|browser-|extensions-) after Theia removed and new VS Code is used by all workspaces
-	@workspace_port header_regexp host Host ^(webview-|browser-|extensions-)?(?P<workspacePort>[0-9]{2,5})-(?P<workspaceID>[a-z0-9][0-9a-z\-]+).ws(?P<location>-[a-z0-9]+)?.{$GITPOD_DOMAIN}
+	@workspace_port header_regexp host Host ^(?P<workspacePort>[0-9]{2,5})-(?P<workspaceID>[a-z0-9][0-9a-z\-]+).ws(?P<location>-[a-z0-9]+)?.{$GITPOD_DOMAIN}
 	handle @workspace_port {
 		reverse_proxy https://ws-proxy.{$KUBE_NAMESPACE}.{$KUBE_DOMAIN}:9090 {
 			import workspace_transport
@@ -299,8 +305,7 @@ https://*.*.{$GITPOD_DOMAIN} {
 		}
 	}
 
-	# remove (webview-|browser-|extensions-) after Theia removed and new VS Code is used by all workspaces
-	@workspace 	header_regexp host Host ^(webview-|browser-|extensions-)?(?P<workspaceID>[a-z0-9][0-9a-z\-]+).ws(?P<location>-[a-z0-9]+)?.{$GITPOD_DOMAIN}
+	@workspace 	header_regexp host Host ^(?P<workspaceID>[a-z0-9][0-9a-z\-]+).ws(?P<location>-[a-z0-9]+)?.{$GITPOD_DOMAIN}
 	handle @workspace {
 		reverse_proxy https://ws-proxy.{$KUBE_NAMESPACE}.{$KUBE_DOMAIN}:9090 {
 			import workspace_transport
@@ -311,8 +316,10 @@ https://*.*.{$GITPOD_DOMAIN} {
 		}
 	}
 
-	# foreign content origin should be decoupled from the workspace (port) origin but the workspace (port) prefix should be the path root for routing
-	@foreign_content header_regexp host Host ^(.*)(foreign).ws(-[a-z0-9]+)?.{$GITPOD_DOMAIN}
+	# REMOVE this once all workspaces have updated to new vscode version
+	# old foreign content route used by vscode to serve webview and webworker resources
+	# origin should be decoupled from the workspace (port) origin but the workspace (port) prefix should be the path root for routing
+	@foreign_content header_regexp host Host ^.+-foreign.ws(-[a-z0-9]+)?.{$GITPOD_DOMAIN}
 	handle @foreign_content {
 		reverse_proxy https://ws-proxy.{$KUBE_NAMESPACE}.{$KUBE_DOMAIN}:9090 {
 			import workspace_transport
