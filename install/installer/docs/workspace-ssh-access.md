@@ -1,7 +1,7 @@
 # Installing Gitpod with SSH access to workspaces with the Gitpod Installer
 **_Needed by some desktop IDEs to connect to a workspace._**
 
-> **IMPORTANT:** This uses port 22 on your Kubernetes nodes. When enabled, this will prevent login to the cluster via SSH. If you wish to maintain SSH access to your cluster, please configure another SSH port on your nodes.
+> **IMPORTANT:** If you use hostPort or nodePort as the method for exposing ports to the public, This will uses port 22 on your Kubernetes nodes. When enabled, this will prevent login to the cluster via SSH. If you wish to maintain SSH access to your cluster, please configure another SSH port on your nodes.
 
 To enable the SSH gateway you need to generate a host key, need to add it as secret to your Kubernetes cluster, and need to configure the Gitpod Installer to use this secret.
 
