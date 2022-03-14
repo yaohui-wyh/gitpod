@@ -308,6 +308,9 @@ async function deployToDevWithInstaller(werft: Werft, jobConfig: JobConfig, depl
         // Relax CPU contraints
         exec(`yq w -i config.yaml workspace.resources.requests.cpu "100m"`, { slice: installerSlices.INSTALLER_RENDER });
 
+        // Disable resolution of latest images and use bundled latest versions instead
+        exec(`yq w -i config.yaml experimental.ide.resolveLatest false`, { slice: installerSlices.INSTALLER_RENDER });
+
         if ((deploymentConfig.analytics || "").startsWith("segment|")) {
             exec(`yq w -i config.yaml analytics.writer segment`, { slice: installerSlices.INSTALLER_RENDER });
             exec(`yq w -i config.yaml analytics.segmentKey ${deploymentConfig.analytics!.substring("segment|".length)}`, { slice: installerSlices.INSTALLER_RENDER });
@@ -390,7 +393,7 @@ async function deployToDevWithInstaller(werft: Werft, jobConfig: JobConfig, depl
         exec(`/tmp/installer validate cluster -c config.yaml || true`, { slice: installerSlices.INSTALLER_RENDER });
 
         // render the k8s manifest
-        exec(`/tmp/installer render --namespace ${deploymentConfig.namespace} --config config.yaml > k8s.yaml`, { silent: true });
+        exec(`/tmp/installer render --use-experimental-config --namespace ${deploymentConfig.namespace} --config config.yaml > k8s.yaml`, { silent: true });
         werft.done(installerSlices.INSTALLER_RENDER);
     } catch (err) {
         if (!jobConfig.mainBuild) {
