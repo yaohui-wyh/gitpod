@@ -136,7 +136,7 @@ packages:
     config:
       dockerfile: leeway.Dockerfile
       metadata:
-        helm-component: workspace.desktopIdeImages.pycharm
+        helm-component: workspace.desktopIdeImages.pycharmLatest
       buildArgs:
         # "https://data.services.jetbrains.com/products?code=PCP&fields=distributions%2Clink%2Cname%2Creleases&_=$(date +%s)000"
         JETBRAINS_BACKEND_URL: "https://download.jetbrains.com/python/pycharm-professional-221.4994.44.tar.gz"
@@ -180,7 +180,7 @@ packages:
     config:
       dockerfile: leeway.Dockerfile
       metadata:
-        helm-component: workspace.desktopIdeImages.phpstorm
+        helm-component: workspace.desktopIdeImages.phpstormLatest
       buildArgs:
         # "https://data.services.jetbrains.com/products?code=PS&fields=distributions%2Clink%2Cname%2Creleases&_=$(date +%s)000"
         JETBRAINS_BACKEND_URL: "https://download.jetbrains.com/webide/PhpStorm-221.4994.43.tar.gz"
