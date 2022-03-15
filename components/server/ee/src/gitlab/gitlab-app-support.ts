@@ -43,7 +43,7 @@ export class GitLabAppSupport {
             const fullPath = anyProject.path_with_namespace as string;
             const cloneUrl = anyProject.http_url_to_repo as string;
             const updatedAt = anyProject.last_activity_at as string;
-            const accountAvatarUrl = anyProject.owner?.avatar_url as string;
+            const accountAvatarUrl = await this.getAccountAvatarUrl(anyProject, params.provider.host);
             const account = fullPath.split("/")[0];
 
             (account === usersGitLabAccount ? ownersRepos : result).push({
@@ -60,5 +60,19 @@ export class GitLabAppSupport {
         // put owner's repos first. the frontend will pick first account to continue with
         result.unshift(...ownersRepos);
         return result;
+    }
+
+    protected async getAccountAvatarUrl(anyProject: any, providerHost: string): Promise<string> {
+        if (anyProject.owner?.avatar_url) {
+            return anyProject.owner.avatar_url;
+        }
+        if (anyProject.namespace?.avatar_url) {
+            let url = anyProject.namespace.avatar_url;
+            if (url[0] === "/") {
+                url = `https://${providerHost}${url}`;
+            }
+            return url;
+        }
+        return "";
     }
 }
