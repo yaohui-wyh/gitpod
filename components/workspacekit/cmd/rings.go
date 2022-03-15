@@ -487,13 +487,25 @@ var ring1Cmd = &cobra.Command{
 			Pdeathsig: syscall.SIGKILL,
 		}
 
-		err = slirpCmd.Start()
+		// err = slirpCmd.Start()
+		// if err != nil {
+		// 	log.WithError(err).Error("cannot start slirp4netns")
+		// 	return
+		// }
+		// //nolint:errcheck
+		// defer slirpCmd.Process.Kill()
+
+		client, err = connectToInWorkspaceDaemonService(ctx)
 		if err != nil {
-			log.WithError(err).Error("cannot start slirp4netns")
+			log.WithError(err).Error("cannot connect to daemon")
 			return
 		}
-		//nolint:errcheck
-		defer slirpCmd.Process.Kill()
+		_, err = client.SetupPairVeth(ctx, &daemonapi.SetupPairVethRequest{Pid: int64(cmd.Process.Pid)})
+		if err != nil {
+			log.WithError(err).Error("can not set up pair veth")
+			return
+		}
+		client.Close()
 
 		log.Info("signaling to child process")
 		_, err = msgutil.MarshalToWriter(ring2Conn, ringSyncMsg{
