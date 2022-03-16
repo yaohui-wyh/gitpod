@@ -31,7 +31,7 @@ export default function PrebuildLogs(props: PrebuildLogsProps) {
 
     useEffect(() => {
         const prebuilds = await getGitpodService().server.findPrebuilds({
-            projectId: 
+            projectId:
         })
     }, [props.prebuildID])
 
