@@ -64,16 +64,9 @@ func configmap(ctx *common.RenderContext) ([]runtime.Object, error) {
 					Type:     typeBrowser,
 					Logo:     getIdeLogoPath("vscode"),
 					Image:    common.ImageName(ctx.Config.Repository, ide.CodeIDEImage, ide.CodeIDEImageStableVersion),
-				},
-				"code-latest": {
-					OrderKey:           pointer.String("01"),
-					Title:              "VS Code",
-					Type:               typeBrowser,
-					Logo:               getIdeLogoPath("vscodeInsiders"),
-					Tooltip:            pointer.String("Early access version, still subject to testing."),
-					Label:              pointer.String("Insiders"),
-					Image:              common.ImageName(ctx.Config.Repository, ide.CodeIDEImage, ctx.VersionManifest.Components.Workspace.CodeImage.Version),
-					ResolveImageDigest: pointer.Bool(true),
+					// todo(hw): need to be resolved, keyword: resolveImageDigest
+					// LatestLogo: getIdeLogoPath("vscodeInsiders"),
+					LatestImage: common.ImageName(ctx.Config.Repository, ide.CodeIDEImage, ctx.VersionManifest.Components.Workspace.CodeImage.Version),
 				},
 				codeDesktop: {
 					OrderKey: pointer.String("02"),
@@ -81,15 +74,8 @@ func configmap(ctx *common.RenderContext) ([]runtime.Object, error) {
 					Type:     typeDesktop,
 					Logo:     getIdeLogoPath("vscode"),
 					Image:    common.ImageName(ctx.Config.Repository, ide.CodeDesktopIDEImage, ctx.VersionManifest.Components.Workspace.DesktopIdeImages.CodeDesktopImage.Version),
-				},
-				codeDesktopInsiders: {
-					OrderKey: pointer.String("03"),
-					Title:    "VS Code",
-					Type:     typeDesktop,
-					Logo:     getIdeLogoPath("vscodeInsiders"),
-					Tooltip:  pointer.String("Visual Studio Code Insiders for early adopters."),
-					Label:    pointer.String("Insiders"),
-					Image:    common.ImageName(ctx.Config.Repository, ide.CodeDesktopInsidersIDEImage, ctx.VersionManifest.Components.Workspace.DesktopIdeImages.CodeDesktopImageInsiders.Version),
+					// LatestLogo: getIdeLogoPath("vscodeInsiders"),
+					LatestImage: common.ImageName(ctx.Config.Repository, ide.CodeDesktopInsidersIDEImage, ctx.VersionManifest.Components.Workspace.DesktopIdeImages.CodeDesktopImageInsiders.Version),
 				},
 				intellij: {
 					OrderKey:    pointer.String("04"),
