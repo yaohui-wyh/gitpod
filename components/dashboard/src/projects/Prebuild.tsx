@@ -162,6 +162,7 @@ export default function () {
                 <div className="rounded-xl overflow-hidden bg-gray-100 dark:bg-gray-800 flex flex-col">
                     <div className="h-96 flex">
                         <PrebuildLogs
+                            prebuildID={prebuild?.}
                             workspaceId={prebuild?.info?.buildWorkspaceId}
                             onInstanceUpdate={onInstanceUpdate}
                         />

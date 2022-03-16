@@ -18,6 +18,7 @@ import { getGitpodService } from "../service/service";
 const WorkspaceLogs = React.lazy(() => import("./WorkspaceLogs"));
 
 export interface PrebuildLogsProps {
+    prebuildID: string;
     workspaceId?: string;
     onInstanceUpdate?: (instance: WorkspaceInstance) => void;
 }
@@ -27,6 +28,12 @@ export default function PrebuildLogs(props: PrebuildLogsProps) {
     const [workspaceInstance, setWorkspaceInstance] = useState<WorkspaceInstance | undefined>();
     const [error, setError] = useState<Error | undefined>();
     const [logsEmitter] = useState(new EventEmitter());
+
+    useEffect(() => {
+        const prebuilds = await getGitpodService().server.findPrebuilds({
+            projectId: 
+        })
+    }, [props.prebuildID])
 
     useEffect(() => {
         const disposables = new DisposableCollection();
