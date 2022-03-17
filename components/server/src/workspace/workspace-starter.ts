@@ -524,8 +524,10 @@ export class WorkspaceStarter {
     ): Promise<WorkspaceInstance> {
         // TODO(cw): once we allow changing the IDE in the workspace config (i.e. .gitpod.yml), we must
         //           give that value precedence over the default choice.
+        const useLatest = !!user.additionalData?.ideSettings?.useLatestVersion;
+        const defaultIde = ideConfig.ideOptions.options[ideConfig.ideOptions.defaultIde];
         const configuration: WorkspaceInstanceConfiguration = {
-            ideImage: ideConfig.ideOptions.options[ideConfig.ideOptions.defaultIde].image,
+            ideImage: useLatest ? defaultIde.latestImage ?? defaultIde.image : defaultIde.image,
             supervisorImage: ideConfig.supervisorImage,
         };
 
@@ -533,7 +535,7 @@ export class WorkspaceStarter {
         if (!!ideChoice) {
             const mappedImage = ideConfig.ideOptions.options[ideChoice];
             if (!!mappedImage && mappedImage.image) {
-                configuration.ideImage = mappedImage.image;
+                configuration.ideImage = useLatest ? mappedImage.latestImage ?? mappedImage.image : mappedImage.image;
             } else if (this.authService.hasPermission(user, "ide-settings")) {
                 // if the IDE choice isn't one of the preconfiured choices, we assume its the image name.
                 // For now, this feature requires special permissions.
@@ -541,7 +543,6 @@ export class WorkspaceStarter {
             }
         }
 
-        const useLatest = !!user.additionalData?.ideSettings?.useLatestVersion;
         const referrerIde = this.resolveReferrerIDE(workspace, user, ideConfig);
         if (referrerIde) {
             configuration.desktopIdeImage = useLatest
