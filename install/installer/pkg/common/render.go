@@ -62,8 +62,9 @@ type GeneratedValues struct {
 type RenderContext struct {
 	VersionManifest versions.Manifest
 	Config          config.Config
-	Namespace       string
-	Values          GeneratedValues
+	InstallationShortname string
+	Namespace             string
+	Values                GeneratedValues
 
 	experimentalConfig *experimental.Config
 }
@@ -123,10 +124,11 @@ func NewRenderContext(cfg config.Config, versionManifest versions.Manifest, name
 	cfg.Experimental = nil
 
 	ctx := &RenderContext{
-		Config:             cfg,
-		VersionManifest:    versionManifest,
-		Namespace:          namespace,
-		experimentalConfig: us,
+		Config:                cfg,
+		VersionManifest:       versionManifest,
+		Namespace:             namespace,
+		InstallationShortname: cfg.Metadata.InstallationShortname,
+		experimentalConfig:    us,
 	}
 
 	err := ctx.generateValues()
