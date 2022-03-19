@@ -43,19 +43,23 @@ export default function NewProject() {
     const [authProviders, setAuthProviders] = useState<AuthProviderInfo[]>([]);
 
     useEffect(() => {
-        if (user && selectedProviderHost === undefined) {
-            if (user.identities.find((i) => i.authProviderId === "Public-GitLab")) {
-                setSelectedProviderHost("gitlab.com");
-            } else if (user.identities.find((i) => i.authProviderId === "Public-GitHub")) {
-                setSelectedProviderHost("github.com");
-            } else if (user.identities.find((i) => i.authProviderId === "Public-Bitbucket")) {
-                setSelectedProviderHost("bitbucket.org");
+        (async () => {
+            setAuthProviders(await getGitpodService().server.getAuthProviders());
+        })();
+    }, []);
+
+    useEffect(() => {
+        if (user && authProviders && selectedProviderHost === undefined) {
+            const candidate = user.identities[user.identities.length - 1];
+            if (candidate) {
+                const authProvider = authProviders.find((ap) => ap.authProviderId === candidate.authProviderId);
+                const host = authProvider?.host;
+                if (host) {
+                    setSelectedProviderHost(host);
+                }
             }
-            (async () => {
-                setAuthProviders(await getGitpodService().server.getAuthProviders());
-            })();
         }
-    }, [user]);
+    }, [user, authProviders]);
 
     useEffect(() => {
         const params = new URLSearchParams(location.search);
@@ -385,7 +389,7 @@ export default function NewProject() {
                                             >
                                                 {toSimpleName(r.name)}
                                             </div>
-                                            <p>Updated {moment(r.updatedAt).fromNow()}</p>
+                                            {r.updatedAt && <p>Updated {moment(r.updatedAt).fromNow()}</p>}
                                         </div>
                                         <div className="flex justify-end">
                                             <div className="h-full my-auto flex self-center opacity-0 group-hover:opacity-100 items-center mr-2 text-right">
@@ -653,7 +657,11 @@ function GitProviders(props: {
 
     const filteredProviders = () =>
         props.authProviders.filter(
-            (p) => p.authProviderType === "GitHub" || p.host === "bitbucket.org" || p.authProviderType === "GitLab",
+            (p) =>
+                p.authProviderType === "GitHub" ||
+                p.host === "bitbucket.org" ||
+                p.authProviderType === "GitLab" ||
+                p.authProviderType === "BitbucketServer",
         );
 
     return (
