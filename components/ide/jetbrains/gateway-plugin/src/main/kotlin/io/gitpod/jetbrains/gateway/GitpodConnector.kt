@@ -12,7 +12,7 @@ import io.gitpod.jetbrains.icons.GitpodIcons
 import java.awt.Component
 import javax.swing.Icon
 import javax.swing.JComponent
-
+import com.intellij.ui.components.ActionLink
 
 class GitpodConnector : GatewayConnector {
     override val icon: Icon
@@ -30,8 +30,8 @@ class GitpodConnector : GatewayConnector {
         return "Connect to Gitpod workspaces"
     }
 
-    override fun getDocumentationLink(): String {
-        return "https://www.gitpod.io/docs/ides-and-editors/jetbrains-gateway"
+    override fun getDocumentationLink(): ActionLink {
+        return ActionLink("https://www.gitpod.io/docs/ides-and-editors/jetbrains-gateway")
     }
 
     override fun getRecentConnections(setContentCallback: (Component) -> Unit): GatewayRecentConnections? {
