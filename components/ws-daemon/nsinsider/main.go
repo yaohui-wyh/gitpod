@@ -254,6 +254,151 @@ func main() {
 					return nil
 				},
 			},
+			{
+				Name:  "setup-veth-pair",
+				Usage: "hogehoge",
+				Flags: []cli.Flag{
+					&cli.IntFlag{
+						Name:     "target-pid",
+						Required: true,
+					},
+					&cli.StringFlag{
+						Name:     "name",
+						Required: true,
+					},
+				},
+				Action: func(c *cli.Context) error {
+					containerIf, vethIf, cethIf := "eth0", "veth0", "ceth0"
+					vethAddr, cethAddr := "10.0.5.1/24", "10.0.5.2"
+
+					ipCmd, iptablesCmd := "/usr/sbin/ip", "/usr/sbin/iptables"
+					netns := "workspace-ns"
+
+					cmd := exec.Command(ipCmd, "link", "add", vethIf, "type", "veth", "peer", "name", cethIf)
+					out, err := cmd.CombinedOutput()
+					if err != nil {
+						return xerrors.Errorf("create a veth pair (%v) failed: %q\n%v",
+							cmd.Args,
+							string(out),
+							err,
+						)
+					}
+
+					path := "/var/run/netns"
+					if err := os.MkdirAll(path, 0755); err != nil {
+						return xerrors.Errorf("create a dir %s failed: %v", path, err)
+					}
+					if err := os.Symlink(fmt.Sprintf("/proc/%d/ns/net", c.Int("target-pid")), filepath.Join(path, netns)); err != nil {
+						return xerrors.Errorf("create a symlink to netns (%v) failed: %q\n%v",
+							cmd.Args,
+							string(out),
+							err,
+						)
+					}
+					cmd = exec.Command(ipCmd, "link", "set", cethIf, "netns", netns)
+					out, err = cmd.CombinedOutput()
+					if err != nil {
+						return xerrors.Errorf("link cethIf to netns (%v) failed: %q\n%v",
+							cmd.Args,
+							string(out),
+							err,
+						)
+					}
+
+					cmd = exec.Command(ipCmd, "addr", "add", vethAddr, "dev", vethIf)
+					out, err = cmd.CombinedOutput()
+					if err != nil {
+						return xerrors.Errorf("assign IP address to the vethIf (%v) failed: %q\n%v",
+							cmd.Args,
+							string(out),
+							err,
+						)
+					}
+
+					cmd = exec.Command(ipCmd, "netns", "exec", netns, "ip", "addr", "add", cethAddr, "dev", cethIf)
+					out, err = cmd.CombinedOutput()
+					if err != nil {
+						return xerrors.Errorf("assign IP address to the cethIf (%v) failed: %q\n%v",
+							cmd.Args,
+							string(out),
+							err,
+						)
+					}
+
+					cmd = exec.Command(ipCmd, "link", "set", vethIf, "up")
+					out, err = cmd.CombinedOutput()
+					if err != nil {
+						return xerrors.Errorf("bring up the vethIf (%v) failed: %q\n%v",
+							cmd.Args,
+							string(out),
+							err,
+						)
+					}
+
+					cmd = exec.Command(ipCmd, "netns", "exec", netns, "ip", "link", "set", cethIf, "up")
+					out, err = cmd.CombinedOutput()
+					if err != nil {
+						return xerrors.Errorf("bring up the cethIf (%v) failed: %q\n%v",
+							cmd.Args,
+							string(out),
+							err,
+						)
+					}
+
+					cmd = exec.Command(ipCmd, "netns", "exec", netns, "ip", "link", "set", "lo", "up")
+					out, err = cmd.CombinedOutput()
+					if err != nil {
+						return xerrors.Errorf("bring up the lo (%v) failed: %q\n%v",
+							cmd.Args,
+							string(out),
+							err,
+						)
+					}
+
+					cmd = exec.Command(iptablesCmd, "-A", "FORWARD", "-o", containerIf, "-i", vethIf, "-j", "ACCEPT")
+					out, err = cmd.CombinedOutput()
+					if err != nil {
+						return xerrors.Errorf("add a forwarding rule for iptable: vethIf -> eth0 (%v) failed: %q\n%v",
+							cmd.Args,
+							string(out),
+							err,
+						)
+					}
+
+					cmd = exec.Command(iptablesCmd, "-A", "FORWARD", "-i", containerIf, "-o", vethIf, "-j", "ACCEPT")
+					out, err = cmd.CombinedOutput()
+					if err != nil {
+						return xerrors.Errorf("add a forwarding rule for iptable: eth0 -> vethIf (%v) failed: %q\n%v",
+							cmd.Args,
+							string(out),
+							err,
+						)
+					}
+
+					cmd = exec.Command(iptablesCmd, "-t", "nat", "-A", "POSTROUTING", "-s", "10.0.2.0/24", "-o", containerIf, "-j", "MASQUERADE")
+					out, err = cmd.CombinedOutput()
+					if err != nil {
+						return xerrors.Errorf("add a nat rule for iptable (%v) failed: %q\n%v",
+							cmd.Args,
+							string(out),
+							err,
+						)
+					}
+
+					// TODO(toru) if we will implement the dynamically ports exporsing, these are commented out.
+					// cmd = exec.Command(ipCmd, "netns", "exec", netns, "ip", "route", "replace", "default", "via", "10.0.2.1")
+					// out, err = cmd.CombinedOutput()
+					// if err != nil {
+					// 	return xerrors.Errorf("change up a default (%v) failed: %q\n%v",
+					// 		cmd.Args,
+					// 		string(out),
+					// 		err,
+					// 	)
+					// }
+
+					return nil
+				},
+			},
 		},
 	}
 
