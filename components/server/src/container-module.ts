@@ -13,6 +13,8 @@ import { GitpodFileParser } from "@gitpod/gitpod-protocol/lib/gitpod-file-parser
 import { WorkspaceFactory } from "./workspace/workspace-factory";
 import { UserController } from "./user/user-controller";
 import { InstallationAdminController } from "./installation-admin/installation-admin-controller";
+import { LicenseEvaluator, LicenseKeySource } from "@gitpod/licensor/lib";
+import { DBLicenseKeySource } from "./license-source";
 import { GitpodServerImpl } from "./workspace/gitpod-server-impl";
 import { ConfigProvider } from "./workspace/config-provider";
 import { MessageBusIntegration } from "./workspace/messagebus-integration";
@@ -133,6 +135,8 @@ export const productionContainerModule = new ContainerModule((bind, unbind, isBo
     bind(EnforcementController).toSelf().inSingletonScope();
 
     bind(InstallationAdminController).toSelf().inSingletonScope();
+    bind(LicenseEvaluator).toSelf().inSingletonScope();
+    bind(LicenseKeySource).to(DBLicenseKeySource).inSingletonScope();
 
     bind(MessagebusConfiguration).toSelf().inSingletonScope();
     bind(MessageBusHelper).to(MessageBusHelperImpl).inSingletonScope();

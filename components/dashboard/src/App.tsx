@@ -44,6 +44,7 @@ import {
 import { refreshSearchData } from "./components/RepositoryFinder";
 import { StartWorkspaceModal } from "./workspaces/StartWorkspaceModal";
 import { parseProps } from "./start/StartWorkspace";
+import { LicenseContext } from "./license-context";
 
 const Setup = React.lazy(() => import(/* webpackPrefetch: true */ "./Setup"));
 const Workspaces = React.lazy(() => import(/* webpackPrefetch: true */ "./workspaces/Workspaces"));
@@ -128,6 +129,8 @@ function App() {
     const { user, setUser } = useContext(UserContext);
     const { teams, setTeams } = useContext(TeamsContext);
     const { setAdminSettings } = useContext(AdminContext);
+    const { setLicenseSettings } = useContext(LicenseContext);
+    /* const { setLicenseSettings } = useContext(LicenseContext); */
     const { setIsDark } = useContext(ThemeContext);
 
     const [loading, setLoading] = useState<boolean>(true);
@@ -165,6 +168,9 @@ function App() {
                 if (user?.rolesOrPermissions?.includes("admin")) {
                     const adminSettings = await getGitpodService().server.adminGetSettings();
                     setAdminSettings(adminSettings);
+
+                    const licenseSettings = await getGitpodService().server.getLicenseInfo();
+                    setLicenseSettings(licenseSettings);
                 }
             } catch (error) {
                 console.error(error);

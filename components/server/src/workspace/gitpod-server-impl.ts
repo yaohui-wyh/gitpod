@@ -23,6 +23,7 @@ import {
     TeamDB,
     InstallationAdminDB,
     ProjectDB,
+    LicenseDB,
 } from "@gitpod/gitpod-db/lib";
 import {
     AuthProviderEntry,
@@ -157,6 +158,7 @@ import { ProjectEnvVar } from "@gitpod/gitpod-protocol/src/protocol";
 import { InstallationAdminSettings, TelemetryData } from "@gitpod/gitpod-protocol";
 import { Deferred } from "@gitpod/gitpod-protocol/lib/util/deferred";
 import { InstallationAdminTelemetryDataProvider } from "../installation-admin/telemetry-data-provider";
+import { LicenseEvaluator, LicenseKeySource } from "@gitpod/licensor/lib";
 
 // shortcut
 export const traceWI = (ctx: TraceContext, wi: Omit<LogContext, "userId">) => TraceContext.setOWI(ctx, wi); // userId is already taken care of in WebsocketConnectionManager
@@ -172,6 +174,9 @@ export type GitpodServerWithTracing = InterfaceWithTraceContext<GitpodServer>;
 
 @injectable()
 export class GitpodServerImpl implements GitpodServerWithTracing, Disposable {
+    @inject(LicenseEvaluator) protected readonly licenseEvaluator: LicenseEvaluator;
+    @inject(LicenseDB) protected readonly licenseDB: LicenseDB;
+    @inject(LicenseKeySource) protected readonly licenseKeySource: LicenseKeySource;
     @inject(Config) protected readonly config: Config;
     @inject(TracedWorkspaceDB) protected readonly workspaceDb: DBWithTracing<WorkspaceDB>;
     @inject(WorkspaceFactory) protected readonly workspaceFactory: WorkspaceFactory;
@@ -2598,7 +2603,11 @@ export class GitpodServerImpl implements GitpodServerWithTracing, Disposable {
     }
 
     async getLicenseInfo(): Promise<GetLicenseInfoResult> {
-        throw new ResponseError(ErrorCodes.EE_FEATURE, `Licensing is implemented in Gitpod's Enterprise Edition`);
+        const result = await this.licenseEvaluator.inspect();
+
+        console.log(result);
+
+        throw new ResponseError(ErrorCodes.EE_FEATURE, result.id);
     }
 
     async licenseIncludesFeature(ctx: TraceContext, feature: LicenseFeature): Promise<boolean> {
@@ -2621,7 +2630,7 @@ export class GitpodServerImpl implements GitpodServerWithTracing, Disposable {
     }
 
     async validateLicense(ctx: TraceContext): Promise<LicenseValidationResult> {
-        throw new ResponseError(ErrorCodes.EE_FEATURE, `Licensing is implemented in Gitpod's Enterprise Edition`);
+        throw new ResponseError(ErrorCodes.EE_FEATURE, `testing teesting`);
     }
 
     async getOwnAuthProviders(ctx: TraceContext): Promise<AuthProviderEntry[]> {

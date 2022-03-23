@@ -6,32 +6,28 @@
 
 import { PageWithSubMenu } from "../components/PageWithSubMenu";
 import { adminMenu } from "./admin-menu";
-import { LicenseService } from "@gitpod/gitpod-protocol/lib/license-protocol";
-import { useContext, useState } from "react";
-import { UserContext } from "../user-context";
+
+import { LicenseContext } from "../license-context";
+import { useContext } from "react";
+import { getGitpodService } from "../service/service";
+import { GetLicenseInfoResult } from "@gitpod/gitpod-protocol";
 
 export default function License() {
+    const { licenseSettings, setLicenseSettings } = useContext(LicenseContext);
+
     // @ts-ignore
-    const { user } = useContext(UserContext);
-    // @ts-ignore
-    const [license, setLicense] = useState<LicenseService>();
-    // @ts-ignore
-    const test = user?.creationDate || new Date().toISOString()
+    const actuallySetLicenseSettings = async (value: GetLicenseInfoResult) => {
+        await getGitpodService().server.getLicenseInfo();
+        setLicenseSettings(value);
+    };
+
     return (
         <div>
-            <PageWithSubMenu
-                subMenu={adminMenu}
-                title="License"
-                subtitle="License information of your account."
-            >
-                {!!license && (
+            <PageWithSubMenu subMenu={adminMenu} title="License" subtitle="License information of your account.">
                 <>
-                    <h3>license</h3>
-                    <p>test</p>
-                    <h3>setLicense</h3>
+                    This info is about the license
+                    <h3> {licenseSettings?.isAdmin} </h3>
                 </>
-                )}
-                <p>test</p>
             </PageWithSubMenu>
         </div>
     );
