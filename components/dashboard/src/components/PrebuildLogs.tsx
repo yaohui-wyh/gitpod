@@ -12,6 +12,7 @@ import {
     DisposableCollection,
     WorkspaceImageBuild,
     HEADLESS_LOG_STREAM_STATUS_CODE_REGEX,
+    Disposable,
 } from "@gitpod/gitpod-protocol";
 import { getGitpodService } from "../service/service";
 
@@ -82,8 +83,10 @@ export default function PrebuildLogs(props: PrebuildLogsProps) {
     useEffect(() => {
         switch (workspaceInstance?.status.phase) {
             // Preparing means that we haven't actually started the workspace instance just yet, but rather
-            // are still preparing for launch. This means we're building the Docker image for the workspace.
+            // are still preparing for launch.
             case "preparing":
+            // Building means we're building the Docker image for the workspace so the workspace hasn't started yet.
+            case "building":
             case "stopped":
                 getGitpodService().server.watchWorkspaceImageBuildLogs(workspace!.id);
                 break;
@@ -104,22 +107,30 @@ export function watchHeadlessLogs(
 ): DisposableCollection {
     const disposables = new DisposableCollection();
 
+    // initializing non-empty here to use this as a stopping signal for the retries down below
+    disposables.push(Disposable.NULL);
+
+    // retry configuration goes here
+    const initialDelaySeconds = 1;
+    const backoffFactor = 1.2;
+    const maxBackoffSeconds = 5;
+    let delayInSeconds = initialDelaySeconds;
+
     const startWatchingLogs = async () => {
         if (await checkIsDone()) {
             return;
         }
 
-        const initialDelaySeconds = 1;
-        let delayInSeconds = initialDelaySeconds;
         const retryBackoff = async (reason: string, err?: Error) => {
-            const backoffFactor = 1.2;
-            const maxBackoffSeconds = 5;
             delayInSeconds = Math.min(delayInSeconds * backoffFactor, maxBackoffSeconds);
 
             console.debug("re-trying headless-logs because: " + reason, err);
             await new Promise((resolve) => {
                 setTimeout(resolve, delayInSeconds * 1000);
             });
+            if (disposables.disposed) {
+                return; // and stop retrying
+            }
             startWatchingLogs().catch(console.error);
         };
 

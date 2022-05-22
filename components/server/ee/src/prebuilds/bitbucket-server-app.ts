@@ -52,7 +52,7 @@ export class BitbucketServerApp {
                     console.warn(`Ignoring unsupported BBS event.`, { headers: req.headers });
                 }
             } catch (err) {
-                console.error(`Couldn't handle request.`, err, { headers: req.headers, reqBody: req.body });
+                console.error(`Couldn't handle request.`, err, { headers: req.headers });
             } finally {
                 // we always respond with OK, when we received a valid event.
                 res.sendStatus(200);
@@ -102,6 +102,12 @@ export class BitbucketServerApp {
             const cloneUrl = context.repository.cloneUrl;
             const commit = context.revision;
             const projectAndOwner = await this.findProjectAndOwner(cloneUrl, user);
+            if (projectAndOwner.project) {
+                /* tslint:disable-next-line */
+                /** no await */ this.projectDB.updateProjectUsage(projectAndOwner.project.id, {
+                    lastWebhookReceived: new Date().toISOString(),
+                });
+            }
             const config = await this.prebuildManager.fetchConfig({ span }, user, context);
             if (!this.prebuildManager.shouldPrebuild(config)) {
                 console.log("Bitbucket push event: No config. No prebuild.");

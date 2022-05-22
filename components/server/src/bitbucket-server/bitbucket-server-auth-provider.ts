@@ -39,7 +39,7 @@ export class BitbucketServerAuthProvider extends GenericAuthProvider {
             ...oauth,
             authorizationUrl: oauth.authorizationUrl || `https://${this.params.host}/rest/oauth2/latest/authorize`,
             tokenUrl: oauth.tokenUrl || `https://${this.params.host}/rest/oauth2/latest/token`,
-            settingsUrl: oauth.settingsUrl || `https://${this.params.host}/plugins/servlet/oauth/users/access-tokens/`,
+            settingsUrl: oauth.settingsUrl,
             scope: BitbucketServerOAuthScopes.ALL.join(scopeSeparator),
             scopeSeparator,
         };
@@ -71,18 +71,8 @@ export class BitbucketServerAuthProvider extends GenericAuthProvider {
                 currentScopes: BitbucketServerOAuthScopes.ALL,
             };
         } catch (error) {
-            log.error(`(${this.strategyName}) Reading current user info failed`, error, { accessToken, error });
+            log.error(`(${this.strategyName}) Reading current user info failed`, error, { error });
             throw error;
         }
     };
-
-    protected normalizeScopes(scopes: string[]) {
-        const set = new Set(scopes);
-        for (const item of set.values()) {
-            if (!BitbucketServerOAuthScopes.Requirements.DEFAULT.includes(item)) {
-                set.delete(item);
-            }
-        }
-        return Array.from(set).sort();
-    }
 }

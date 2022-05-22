@@ -1,6 +1,8 @@
+import * as fs from 'fs';
 import { exec } from "../../../util/shell";
 import { Werft } from "../../../util/werft";
 import { getNodePoolIndex } from "../deploy-to-preview-environment";
+import { renderPayment } from "../payment/render";
 
 const BLOCK_NEW_USER_CONFIG_PATH = './blockNewUsers';
 const WORKSPACE_SIZE_CONFIG_PATH = './workspaceSizing';
@@ -33,6 +35,8 @@ export type InstallerOptions = {
     withVM: boolean
     workspaceFeatureFlags: string[]
     gitpodDaemonsetPorts: GitpodDaemonsetPorts
+    smithToken: string
+    withPayment: boolean
 }
 
 export class Installer {
@@ -61,12 +65,19 @@ export class Installer {
             this.configureObservability(slice)
             this.configureAuthProviders(slice)
             this.configureSSHGateway(slice)
+            this.configurePublicAPIServer(slice)
 
             if (this.options.analytics) {
                 this.includeAnalytics(slice)
             } else {
                 this.dontIncludeAnalytics(slice)
             }
+
+            if (this.options.withPayment) {
+                // let installer know that there is a chargbee config
+                exec(`yq w -i ${this.options.installerConfigPath} experimental.webapp.server.chargebeeSecret chargebee-config`, { slice: slice });
+            }
+
         } catch (err) {
             throw new Error(err)
         }
@@ -143,6 +154,10 @@ export class Installer {
         exec(`yq w -i ${this.options.installerConfigPath} sshGatewayHostKey.name "host-key"`)
     }
 
+    private configurePublicAPIServer(slice: string) {
+        exec(`yq w -i ${this.options.installerConfigPath} experimental.webapp.publicApi.enabled true`, { slice: slice })
+    }
+
     private includeAnalytics(slice: string): void {
         exec(`yq w -i ${this.options.installerConfigPath} analytics.writer segment`, { slice: slice });
         exec(`yq w -i ${this.options.installerConfigPath} analytics.segmentKey ${this.options.analytics.token}`, { slice: slice });
@@ -170,6 +185,7 @@ export class Installer {
 
         this.configureLicense(slice)
         this.configureWorkspaceFeatureFlags(slice)
+        this.configurePayment(slice)
         this.process(slice)
 
         this.options.werft.done(slice)
@@ -194,14 +210,33 @@ export class Installer {
             })
             // post-process.sh looks for /tmp/defaultFeatureFlags
             // each "flag" string gets added to the configmap
+            // also watches aout for /tmp/payment
         }
+    }
+
+    private configurePayment(slice: string): void {
+        // 1. Read versions from docker image
+        this.options.werft.log(slice, "configuring withPayment...");
+        try {
+            exec(`docker run --rm eu.gcr.io/gitpod-core-dev/build/versions:${this.options.version} cat /versions.yaml > versions.yaml`);
+        } catch (err) {
+            this.options.werft.fail(slice, err);
+        }
+        const serviceWaiterVersion = exec("yq r ./versions.yaml 'components.serviceWaiter.version'").stdout.toString().trim();
+        const paymentEndpointVersion = exec("yq r ./versions.yaml 'components.paymentEndpoint.version'").stdout.toString().trim();
+
+        // 2. render chargebee-config and payment-endpoint
+        const paymentYamls = renderPayment(this.options.deploymentNamespace, paymentEndpointVersion, serviceWaiterVersion);
+        fs.writeFileSync("/tmp/payment", paymentYamls);
+
+        this.options.werft.log(slice, "done configuring withPayment.");
     }
 
     private process(slice: string): void {
         const nodepoolIndex = getNodePoolIndex(this.options.deploymentNamespace);
         const flags = this.options.withVM ? "WITH_VM=true " : ""
 
-        exec(`${flags}./.werft/jobs/build/installer/post-process.sh ${this.options.gitpodDaemonsetPorts.registryFacade} ${this.options.gitpodDaemonsetPorts.wsDaemon} ${nodepoolIndex} ${this.options.previewName}`, { slice: slice });
+        exec(`${flags}./.werft/jobs/build/installer/post-process.sh ${this.options.gitpodDaemonsetPorts.registryFacade} ${this.options.gitpodDaemonsetPorts.wsDaemon} ${nodepoolIndex} ${this.options.previewName} ${this.options.smithToken}`, { slice: slice });
     }
 
     install(slice: string): void {

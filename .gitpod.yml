@@ -1,4 +1,4 @@
-image: eu.gcr.io/gitpod-core-dev/dev/dev-environment:clu-yq4.1
+image: eu.gcr.io/gitpod-core-dev/dev/dev-environment:af-rebuild-dev-image.0
 workspaceLocation: gitpod/gitpod-ws.code-workspace
 checkoutLocation: gitpod
 ports:
@@ -33,13 +33,15 @@ ports:
 tasks:
   - name: Add Harvester kubeconfig
     command: |
-      ./dev/preview/download-and-merge-harvester-kubeconfig.sh
+      ./dev/preview/util/download-and-merge-harvester-kubeconfig.sh
       exit 0
   - name: Java
-    init: |
-      leeway exec --package components/supervisor-api/java:lib --package components/gitpod-protocol/java:lib -- ./gradlew build
-      leeway exec --package components/ide/jetbrains/backend-plugin:plugin -- ./gradlew buildPlugin
-      leeway exec --package components/ide/jetbrains/gateway-plugin:publish -- ./gradlew buildPlugin
+    command: |
+      if [ -z "$RUN_GRADLE_TASK" ]; then
+        read -r -p "Press enter to continue Java gradle task"
+      fi
+      leeway exec --package components/supervisor-api/java:lib --package components/gitpod-protocol/java:lib -- ./gradlew --build-cache build
+      leeway exec --package components/ide/jetbrains/backend-plugin:plugin --package components/ide/jetbrains/gateway-plugin:publish --parallel -- ./gradlew --build-cache buildPlugin
   - name: TypeScript
     before: scripts/branch-namespace.sh
     init: yarn --network-timeout 100000 && yarn build
@@ -62,3 +64,9 @@ vscode:
     - timonwong.shellcheck
     - vscjava.vscode-java-pack
     - fwcd.kotlin
+    - dbaeumer.vscode-eslint
+    - esbenp.prettier-vscode
+jetbrains:
+  goland:
+    prebuilds:
+      version: stable

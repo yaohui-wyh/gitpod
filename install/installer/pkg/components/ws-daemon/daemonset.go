@@ -32,7 +32,7 @@ func daemonset(ctx *common.RenderContext) ([]runtime.Object, error) {
 	initContainers := []corev1.Container{
 		{
 			Name:  "disable-kube-health-monitor",
-			Image: common.ImageName(common.ThirdPartyContainerRepo(ctx.Config.Repository, common.DockerRegistryURL), "library/ubuntu", "20.04"),
+			Image: ctx.ImageName(common.ThirdPartyContainerRepo(ctx.Config.Repository, common.DockerRegistryURL), "library/ubuntu", "20.04"),
 			Command: []string{
 				"/usr/bin/nsenter",
 				"-t",
@@ -61,7 +61,7 @@ fi
 		},
 		{
 			Name:  "seccomp-profile-installer",
-			Image: common.ImageName(cfg.Repository, "seccomp-profile-installer", ctx.VersionManifest.Components.WSDaemon.UserNamespaces.SeccompProfileInstaller.Version),
+			Image: ctx.ImageName(cfg.Repository, "seccomp-profile-installer", ctx.VersionManifest.Components.WSDaemon.UserNamespaces.SeccompProfileInstaller.Version),
 			Command: []string{
 				"/bin/sh",
 				"-c",
@@ -75,7 +75,7 @@ fi
 		},
 		{
 			Name:  "sysctl",
-			Image: common.ImageName(cfg.Repository, "ws-daemon", ctx.VersionManifest.Components.WSDaemon.Version),
+			Image: ctx.ImageName(cfg.Repository, "ws-daemon", ctx.VersionManifest.Components.WSDaemon.Version),
 			Command: []string{
 				"sh",
 				"-c",
@@ -97,7 +97,7 @@ fi
 	if cfg.Workspace.Runtime.FSShiftMethod == config.FSShiftShiftFS {
 		initContainers = append(initContainers, corev1.Container{
 			Name:  "shiftfs-module-loader",
-			Image: common.ImageName(cfg.Repository, "shiftfs-module-loader", ctx.VersionManifest.Components.WSDaemon.UserNamespaces.ShiftFSModuleLoader.Version),
+			Image: ctx.ImageName(cfg.Repository, "shiftfs-module-loader", ctx.VersionManifest.Components.WSDaemon.UserNamespaces.ShiftFSModuleLoader.Version),
 			VolumeMounts: []corev1.VolumeMount{{
 				Name:      "node-linux-src",
 				ReadOnly:  true,
@@ -190,7 +190,7 @@ fi
 		Containers: []corev1.Container{
 			{
 				Name:  Component,
-				Image: common.ImageName(ctx.Config.Repository, Component, ctx.VersionManifest.Components.WSDaemon.Version),
+				Image: ctx.ImageName(ctx.Config.Repository, Component, ctx.VersionManifest.Components.WSDaemon.Version),
 				Args: []string{
 					"run",
 					"--config",
@@ -203,7 +203,7 @@ fi
 				}},
 				Env: common.MergeEnv(
 					common.DefaultEnv(&cfg),
-					common.TracingEnv(ctx),
+					common.WorkspaceTracingEnv(ctx),
 					[]corev1.EnvVar{{
 						Name: "NODENAME",
 						ValueFrom: &corev1.EnvVarSource{
@@ -213,10 +213,10 @@ fi
 						},
 					}},
 				),
-				Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+				Resources: common.ResourceRequirements(ctx, Component, Component, corev1.ResourceRequirements{Requests: corev1.ResourceList{
 					"cpu":    resource.MustParse("1m"),
 					"memory": resource.MustParse("1Mi"),
-				}},
+				}}),
 				VolumeMounts: []corev1.VolumeMount{
 					{
 						Name:             "working-area",
@@ -287,7 +287,7 @@ fi
 					PeriodSeconds:       10,
 					TimeoutSeconds:      1,
 					SuccessThreshold:    1,
-					FailureThreshold:    3,
+					FailureThreshold:    5,
 				},
 				Lifecycle: &corev1.Lifecycle{
 					PostStart: &corev1.LifecycleHandler{
@@ -313,7 +313,7 @@ fi
 		DNSPolicy:                     "ClusterFirst",
 		ServiceAccountName:            Component,
 		HostPID:                       true,
-		Affinity:                      common.Affinity(cluster.AffinityLabelWorkspacesRegular, cluster.AffinityLabelWorkspacesHeadless),
+		Affinity:                      common.NodeAffinity(cluster.AffinityLabelWorkspacesRegular, cluster.AffinityLabelWorkspacesHeadless),
 		Tolerations: []corev1.Toleration{
 			{
 				Key:      "node.kubernetes.io/disk-pressure",
@@ -338,6 +338,14 @@ fi
 	err = common.AddStorageMounts(ctx, &podSpec, Component)
 	if err != nil {
 		return nil, err
+	}
+
+	if vol, mnt, env, ok := common.CustomCACertVolume(ctx); ok {
+		podSpec.Volumes = append(podSpec.Volumes, *vol)
+		pod := podSpec.Containers[0]
+		pod.VolumeMounts = append(pod.VolumeMounts, *mnt)
+		pod.Env = append(pod.Env, env...)
+		podSpec.Containers[0] = pod
 	}
 
 	return []runtime.Object{&appsv1.DaemonSet{

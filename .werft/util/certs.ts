@@ -1,8 +1,8 @@
 import { exec, ExecOptions } from './shell';
-import { sleep } from './util';
 import * as path from 'path';
 import { CORE_DEV_KUBECONFIG_PATH } from '../jobs/build/const';
 import { Werft } from './werft';
+import { reportCertificateError } from '../util/slack';
 
 
 export class IssueCertificateParams {
@@ -26,30 +26,26 @@ export class InstallCertificateParams {
     destinationKubeconfig: string
 }
 
-export async function issueCertificate(werft, params: IssueCertificateParams, shellOpts: ExecOptions) {
+export async function issueCertificate(werft: Werft, params: IssueCertificateParams, shellOpts: ExecOptions) {
     var subdomains = [];
     werft.log(shellOpts.slice, `Subdomains: ${params.additionalSubdomains}`)
     for (const sd of params.additionalSubdomains) {
         subdomains.push(sd);
     }
 
-    try {
-        exec(`echo "Domain: ${params.domain}, Subdomains: ${subdomains}"`, {slice: shellOpts.slice})
-        validateSubdomains(params.domain, subdomains)
-        createCertificateResource(werft, shellOpts, params, subdomains)
-    } catch (err) {
-        throw new Error(err)
-    }
+    exec(`echo "Domain: ${params.domain}, Subdomains: ${subdomains}"`, {slice: shellOpts.slice})
+    validateSubdomains(werft, shellOpts.slice, params.domain, subdomains)
+    createCertificateResource(werft, shellOpts, params, subdomains)
 }
 
-function validateSubdomains(domain: string, subdomains: string[]): void {
+function validateSubdomains(werft: Werft, slice: string, domain: string, subdomains: string[]): void {
     // sanity: check if there is a "SAN short enough to fit into CN (63 characters max)"
     // source: https://community.letsencrypt.org/t/certbot-errors-with-obtaining-a-new-certificate-an-unexpected-error-occurred-the-csr-is-unacceptable-e-g-due-to-a-short-key-error-finalizing-order-issuing-precertificate-csr-doesnt-contain-a-san-short-enough-to-fit-in-cn/105513/2
     if (!subdomains.some(sd => {
         const san = sd + domain;
         return san.length <= 63;
     })) {
-        throw new Error(`there is no subdomain + '${domain}' shorter or equal to 63 characters, max. allowed length for CN. No HTTPS certs for you! Consider using a short branch name...`);
+        werft.fail(slice, `there is no subdomain + '${domain}' shorter or equal to 63 characters, max. allowed length for CN. No HTTPS certs for you! Consider using a short branch name...`)
     }
 }
 
@@ -70,17 +66,13 @@ function createCertificateResource(werft: Werft, shellOpts: ExecOptions, params:
     const rc = exec(cmd, { slice: shellOpts.slice }).code
 
     if (rc != 0) {
-        throw new Error("Failed to create the certificate Custom Resource")
+        werft.fail(shellOpts.slice, "Failed to create the certificate Custom Resource")
     }
 }
 
 export async function installCertificate(werft, params: InstallCertificateParams, shellOpts: ExecOptions) {
-    try {
-        waitForCertificateReadiness(werft, params.certName, shellOpts.slice)
-        copyCachedSecret(werft, params, shellOpts.slice)
-    } catch (err) {
-        throw err
-    }
+    waitForCertificateReadiness(werft, params.certName, shellOpts.slice)
+    copyCachedSecret(werft, params, shellOpts.slice)
 }
 
 function waitForCertificateReadiness(werft: Werft, certName: string, slice: string) {
@@ -89,7 +81,11 @@ function waitForCertificateReadiness(werft: Werft, certName: string, slice: stri
     const rc = exec(`kubectl --kubeconfig ${CORE_DEV_KUBECONFIG_PATH} wait --for=condition=Ready --timeout=${timeout} -n certs certificate ${certName}`).code
 
     if (rc != 0) {
-        throw new Error(`Timeout while waiting for certificate readiness after ${timeout}`)
+        werft.log(slice, "The certificate never became Ready. We are deleting the certificate so that the next job can create a new one")
+        const certificateYAML = exec(`kubectl --kubeconfig ${CORE_DEV_KUBECONFIG_PATH} -n certs get certificate ${certName} -o yaml`, { silent: true }).stdout.trim()
+        exec(`kubectl --kubeconfig ${CORE_DEV_KUBECONFIG_PATH} -n certs delete certificate ${certName}`, {slice: slice})
+        reportCertificateError({certificateName: certName, certifiateYAML: certificateYAML}).catch((error: Error) => console.error("Failed to send message to Slack", error));
+        werft.fail(slice, `Timeout while waiting for certificate readiness after ${timeout}. We have deleted the certificate. Please retry your Werft job. The issue has been reported to the Platform team so they can investigate. Sorry for the inconveneince.`)
     }
 }
 
@@ -106,6 +102,6 @@ function copyCachedSecret(werft: Werft, params: InstallCertificateParams, slice:
     const rc = exec(cmd, { slice: slice }).code;
 
     if (rc != 0) {
-        throw new Error(`Failed to copy certificate. Destination namespace: ${params.destinationNamespace}. Destination Kubeconfig: ${params.destinationKubeconfig}`)
+        werft.fail(slice, `Failed to copy certificate. Destination namespace: ${params.destinationNamespace}. Destination Kubeconfig: ${params.destinationKubeconfig}`)
     }
 }

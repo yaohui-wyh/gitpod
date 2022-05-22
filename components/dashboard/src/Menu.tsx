@@ -26,6 +26,7 @@ import { getTeamSettingsMenu } from "./teams/TeamSettings";
 import { getProjectSettingsMenu } from "./projects/ProjectSettings";
 import { ProjectContext } from "./projects/project-context";
 import { PaymentContext } from "./payment-context";
+import FeedbackFormModal from "./feedback-form/FeedbackModal";
 
 interface Entry {
     title: string;
@@ -41,6 +42,7 @@ export default function Menu() {
     const { showPaymentUI, setShowPaymentUI, setCurrency, setIsStudent, setIsChargebeeCustomer } =
         useContext(PaymentContext);
     const { project, setProject } = useContext(ProjectContext);
+    const [isFeedbackFormVisible, setFeedbackFormVisible] = useState<boolean>(false);
 
     const match = useRouteMatch<{ segment1?: string; segment2?: string; segment3?: string }>(
         "/(t/)?:segment1/:segment2?/:segment3?",
@@ -54,6 +56,7 @@ export default function Menu() {
                 "projects",
                 "members",
                 "settings",
+                "billing",
                 // admin sub-pages
                 "users",
                 "workspaces",
@@ -188,7 +191,7 @@ export default function Menu() {
                 teamSettingsList.push({
                     title: "Settings",
                     link: `/t/${team.slug}/settings`,
-                    alternatives: getTeamSettingsMenu(team).flatMap((e) => e.link),
+                    alternatives: getTeamSettingsMenu({ team, showPaymentUI }).flatMap((e) => e.link),
                 });
             }
 
@@ -226,12 +229,15 @@ export default function Menu() {
             title: "Docs",
             link: "https://www.gitpod.io/docs/",
         },
-        {
-            title: "Help",
-            link: "https://www.gitpod.io/support",
-        },
     ];
 
+    const handleFeedbackFormClick = () => {
+        setFeedbackFormVisible(true);
+    };
+
+    const onFeedbackFormClose = () => {
+        setFeedbackFormVisible(false);
+    };
     const renderTeamMenu = () => {
         return (
             <div className="flex p-1 pl-3 ">
@@ -370,6 +376,9 @@ export default function Menu() {
                                             />
                                         </li>
                                     ))}
+                                <li className="cursor-pointer">
+                                    <PillMenuItem name="Feedback" onClick={handleFeedbackFormClick} />
+                                </li>
                             </ul>
                         </nav>
                         <div
@@ -379,13 +388,17 @@ export default function Menu() {
                             <ContextMenu
                                 menuEntries={[
                                     {
-                                        title: (user && User.getPrimaryEmail(user)) || "",
+                                        title: (user && (User.getPrimaryEmail(user) || user?.name)) || "User",
                                         customFontStyle: "text-gray-400",
                                         separator: true,
                                     },
                                     {
                                         title: "Settings",
                                         link: "/settings",
+                                    },
+                                    {
+                                        title: "Help",
+                                        link: "https://www.gitpod.io/support",
                                         separator: true,
                                     },
                                     {
@@ -402,6 +415,7 @@ export default function Menu() {
                             </ContextMenu>
                         </div>
                     </div>
+                    {isFeedbackFormVisible && <FeedbackFormModal onClose={onFeedbackFormClose} />}
                 </div>
                 {!isMinimalUI && !prebuildId && (
                     <nav className="flex">

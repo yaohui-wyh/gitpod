@@ -21,7 +21,6 @@ export interface JobConfig {
     storage: string;
     version: string;
     withContrib: boolean
-    withHelm: boolean
     withIntegrationTests: boolean;
     withObservability: boolean
     withPayment: boolean
@@ -71,7 +70,7 @@ export function jobConfig(werft: Werft, context: any): JobConfig {
     const coverageOutput = exec("mktemp -d", { silent: true }).stdout.trim();
 
     // Main build should only contain the annotations below:
-    // ['with-contrib', 'publish-to-npm', 'publish-to-jb-marketplace', 'clean-slate-deployment']
+    // ['with-contrib', 'publish-to-npm', 'publish-to-jb-marketplace', 'with-clean-slate-deployment']
     const dynamicCPULimits = "dynamic-cpu-limits" in buildConfig && !mainBuild;
     const withContrib = "with-contrib" in buildConfig || mainBuild;
     const noPreview = ("no-preview" in buildConfig && buildConfig["no-preview"] !== "false") || publishRelease;
@@ -87,7 +86,6 @@ export function jobConfig(werft: Werft, context: any): JobConfig {
     const installEELicense = !("without-ee-license" in buildConfig) || mainBuild;
     const withPayment = "with-payment" in buildConfig && !mainBuild;
     const withObservability = "with-observability" in buildConfig && !mainBuild;
-    const withHelm = "with-helm" in buildConfig && !mainBuild;
     const repository: Repository = {
         owner: context.Repository.owner,
         repo: context.Repository.repo,
@@ -98,7 +96,8 @@ export function jobConfig(werft: Werft, context: any): JobConfig {
     if (repository.branch.startsWith(refsPrefix)) {
         repository.branch = repository.branch.substring(refsPrefix.length);
     }
-    const withVM = ("with-vm" in buildConfig || repository.branch.includes("with-vm")) && !mainBuild;
+    const withoutVM = "without-vm" in buildConfig;
+    const withVM = !withoutVM || mainBuild;
 
     const previewName = previewNameFromBranchName(repository.branch)
     const previewEnvironmentNamespace = withVM ? `default` : `staging-${previewName}`;
@@ -133,7 +132,6 @@ export function jobConfig(werft: Werft, context: any): JobConfig {
         storage,
         version,
         withContrib,
-        withHelm,
         withIntegrationTests,
         withObservability,
         withPayment,

@@ -11,7 +11,7 @@ import { Server } from "../../src/server";
 import { ServerEE } from "./server";
 import { UserController } from "../../src/user/user-controller";
 import { UserControllerEE } from "./user/user-controller";
-import { LicenseEvaluator, LicenseKeySource } from "@gitpod/licensor/lib";
+import { LicenseKeySource } from "@gitpod/licensor/lib";
 import { DBLicenseKeySource } from "./license-source";
 import { UserService } from "../../src/user/user-service";
 import { UserServiceEE } from "./user/user-service";
@@ -36,6 +36,7 @@ import {
     AccountServiceImpl,
     SubscriptionService,
     TeamSubscriptionService,
+    TeamSubscription2Service,
 } from "@gitpod/gitpod-payment-endpoint/lib/accounting";
 import {
     ChargebeeProvider,
@@ -82,7 +83,6 @@ export const productionEEContainerModule = new ContainerModule((bind, unbind, is
 
     bind(UserCounter).toSelf().inSingletonScope();
 
-    bind(LicenseEvaluator).toSelf().inSingletonScope();
     bind(LicenseKeySource).to(DBLicenseKeySource).inSingletonScope();
 
     // GitpodServerImpl (stateful per user)
@@ -107,6 +107,7 @@ export const productionEEContainerModule = new ContainerModule((bind, unbind, is
     bind(AccountService).to(AccountServiceImpl).inSingletonScope();
     bind(SubscriptionService).toSelf().inSingletonScope();
     bind(TeamSubscriptionService).toSelf().inSingletonScope();
+    bind(TeamSubscription2Service).toSelf().inSingletonScope();
 
     // payment/billing
     bind(ChargebeeProvider).toSelf().inSingletonScope();

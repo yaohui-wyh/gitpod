@@ -79,7 +79,14 @@ func (store *IPFSBlobCache) Store(ctx context.Context, dgst digest.Digest, conte
 		return nil
 	}
 
-	p, err := store.IPFS.Unixfs().Add(ctx, files.NewReaderFile(content), options.Unixfs.Pin(true), options.Unixfs.CidVersion(1))
+	opts := []options.UnixfsAddOption{
+		options.Unixfs.Pin(true),
+		options.Unixfs.CidVersion(1),
+		options.Unixfs.RawLeaves(true),
+		options.Unixfs.FsCache(true),
+	}
+
+	p, err := store.IPFS.Unixfs().Add(ctx, files.NewReaderFile(content), opts...)
 	if err != nil {
 		return err
 	}
@@ -244,18 +251,26 @@ func (w *redisBlobWriter) Commit(ctx context.Context, size int64, expected diges
 	var (
 		kContent = fmt.Sprintf("cnt.%s", w.digest)
 		kInfo    = fmt.Sprintf("nfo.%s", w.digest)
-		ttl      = 48 * time.Hour
 	)
 
-	trans := w.client.Pipeline()
-	trans.MSet(ctx, map[string]string{
+	existingKeys, err := w.client.Exists(ctx, kContent, kInfo).Result()
+	if err != nil {
+		return err
+	}
+
+	if existingKeys != 0 {
+		return nil
+	}
+
+	err = w.client.MSet(ctx, map[string]interface{}{
 		kContent: w.buf.String(),
 		kInfo:    string(rnfo),
-	})
-	trans.Expire(ctx, kContent, ttl)
-	trans.Expire(ctx, kInfo, ttl)
-	_, err = trans.Exec(ctx)
-	return err
+	}).Err()
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // Status returns the current state of write

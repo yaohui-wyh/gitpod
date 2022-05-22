@@ -47,6 +47,7 @@ func (v version) Defaults(in interface{}) error {
 	cfg.Certificate.Name = "https-certificates"
 	cfg.Database.InCluster = pointer.Bool(true)
 	cfg.Metadata.Region = "local"
+	cfg.Metadata.InstallationShortname = "default" // TODO(gpl): we're tied to "default" here because that's what we put into static bridges in the past
 	cfg.ObjectStorage.InCluster = pointer.Bool(true)
 	cfg.ContainerRegistry.InCluster = pointer.Bool(true)
 	cfg.Workspace.Resources.Requests = corev1.ResourceList{
@@ -57,17 +58,23 @@ func (v version) Defaults(in interface{}) error {
 	cfg.Workspace.Runtime.ContainerDSocket = "/run/containerd/containerd.sock"
 	cfg.Workspace.Runtime.ContainerDRuntimeDir = "/var/lib/containerd/io.containerd.runtime.v2.task/k8s.io"
 	cfg.Workspace.MaxLifetime = util.Duration(36 * time.Hour)
+	cfg.Workspace.PVC.Size = resource.MustParse("30Gi")
+	cfg.Workspace.PVC.StorageClass = ""
+	cfg.Workspace.PVC.SnapshotClass = ""
 	cfg.OpenVSX.URL = "https://open-vsx.org"
-	cfg.DisableDefinitelyGP = false
+	cfg.DisableDefinitelyGP = true
 
 	return nil
 }
 
+// Config defines the v1 version structure of the gitpod config file
 type Config struct {
-	Kind       InstallationKind `json:"kind" validate:"required,installation_kind"`
-	Domain     string           `json:"domain" validate:"required,fqdn"`
-	Metadata   Metadata         `json:"metadata"`
-	Repository string           `json:"repository" validate:"required,ascii"`
+	// Installation type to run - for most users, this will be Full
+	Kind InstallationKind `json:"kind" validate:"required,installation_kind"`
+	// The domain to deploy to
+	Domain     string   `json:"domain" validate:"required,fqdn"`
+	Metadata   Metadata `json:"metadata"`
+	Repository string   `json:"repository" validate:"required,ascii"`
 
 	Observability Observability `json:"observability"`
 	Analytics     *Analytics    `json:"analytics,omitempty"`
@@ -94,11 +101,18 @@ type Config struct {
 
 	DisableDefinitelyGP bool `json:"disableDefinitelyGp"`
 
+	CustomCACert *ObjectRef `json:"customCACert,omitempty"`
+
+	DropImageRepo *bool `json:"dropImageRepo,omitempty"`
+
 	Experimental *experimental.Config `json:"experimental,omitempty"`
 }
 
 type Metadata struct {
+	// Location for your objectStorage provider
 	Region string `json:"region" validate:"required"`
+	// InstallationShortname establishes the "identity" of the (application) cluster.
+	InstallationShortname string `json:"shortname" validate:"required"`
 }
 
 type Observability struct {
@@ -132,10 +146,12 @@ type DatabaseCloudSQL struct {
 }
 
 type ObjectStorage struct {
-	InCluster    *bool                      `json:"inCluster,omitempty"`
-	S3           *ObjectStorageS3           `json:"s3,omitempty"`
-	CloudStorage *ObjectStorageCloudStorage `json:"cloudStorage,omitempty"`
-	Azure        *ObjectStorageAzure        `json:"azure,omitempty"`
+	InCluster          *bool                      `json:"inCluster,omitempty"`
+	S3                 *ObjectStorageS3           `json:"s3,omitempty"`
+	CloudStorage       *ObjectStorageCloudStorage `json:"cloudStorage,omitempty"`
+	Azure              *ObjectStorageAzure        `json:"azure,omitempty"`
+	MaximumBackupCount *int                       `json:"maximumBackupCount,omitempty"`
+	BlobQuota          *int64                     `json:"blobQuota,omitempty"`
 }
 
 type ObjectStorageS3 struct {
@@ -210,24 +226,39 @@ type Resources struct {
 }
 
 type WorkspaceRuntime struct {
-	FSShiftMethod        FSShiftMethod `json:"fsShiftMethod" validate:"required,fs_shift_method"`
-	ContainerDRuntimeDir string        `json:"containerdRuntimeDir" validate:"required,startswith=/"`
-	ContainerDSocket     string        `json:"containerdSocket" validate:"required,startswith=/"`
+	// File system
+	FSShiftMethod FSShiftMethod `json:"fsShiftMethod" validate:"required,fs_shift_method"`
+	// The location of containerd socket on the host machine
+	ContainerDRuntimeDir string `json:"containerdRuntimeDir" validate:"required,startswith=/"`
+	// The location of containerd socket on the host machine
+	ContainerDSocket string `json:"containerdSocket" validate:"required,startswith=/"`
 }
 
 type WorkspaceTemplates struct {
 	Default    *corev1.Pod `json:"default"`
 	Prebuild   *corev1.Pod `json:"prebuild"`
-	Ghost      *corev1.Pod `json:"ghost"`
 	ImageBuild *corev1.Pod `json:"imagebuild"`
 	Regular    *corev1.Pod `json:"regular"`
-	Probe      *corev1.Pod `json:"probe"`
+}
+
+type PersistentVolumeClaim struct {
+	// Size is a size of persistent volume claim to use
+	Size resource.Quantity `json:"size" validate:"required"`
+
+	// StorageClass is a storage class of persistent volume claim to use
+	StorageClass string `json:"storageClass"`
+
+	// SnapshotClass is a snapshot class name that is used to create snapshot volume
+	SnapshotClass string `json:"snapshotClass"`
 }
 
 type Workspace struct {
 	Runtime   WorkspaceRuntime    `json:"runtime" validate:"required"`
 	Resources Resources           `json:"resources" validate:"required"`
 	Templates *WorkspaceTemplates `json:"templates,omitempty"`
+
+	// PVC is the struct that describes how to setup persistent volume claim for workspace
+	PVC PersistentVolumeClaim `json:"pvc" validate:"required"`
 
 	// MaxLifetime is the maximum time a workspace is allowed to run. After that, the workspace times out despite activity
 	MaxLifetime util.Duration `json:"maxLifetime" validate:"required"`

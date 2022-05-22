@@ -16,13 +16,18 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
+	"reflect"
 	"regexp"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/hashicorp/go-version"
 	"golang.org/x/xerrors"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	yaml "gopkg.in/yaml.v2"
 
 	"github.com/gitpod-io/gitpod/common-go/log"
@@ -40,7 +45,6 @@ var (
 )
 
 const BackendPath = "/ide-desktop/backend"
-const RemoteDevServer = BackendPath + "/bin/remote-dev-server.sh"
 const ProductInfoPath = BackendPath + "/product-info.json"
 
 // JB startup entrypoint
@@ -52,7 +56,7 @@ func main() {
 		log.Fatalf("Usage: %s <port> <kind> [<link label>]\n", os.Args[0])
 	}
 	port := os.Args[1]
-	kind := os.Args[2]
+	alias := os.Args[2]
 	label := "Open JetBrains IDE"
 	if len(os.Args) > 3 {
 		label = os.Args[3]
@@ -74,7 +78,7 @@ func main() {
 
 	version_2022_1, _ := version.NewVersion("2022.1")
 	if version_2022_1.LessThanOrEqual(backendVersion) {
-		err = installPlugins(wsInfo)
+		err = installPlugins(wsInfo, alias)
 		installPluginsCost := time.Now().Local().Sub(startTime).Milliseconds()
 		if err != nil {
 			log.WithError(err).WithField("cost", installPluginsCost).Error("installing repo plugins: done")
@@ -83,7 +87,11 @@ func main() {
 		}
 	}
 
-	go run(wsInfo)
+	err = configureXmx(alias)
+	if err != nil {
+		log.WithError(err).Error("failed to configure backend Xmx")
+	}
+	go run(wsInfo, alias)
 
 	http.HandleFunc("/joinLink", func(w http.ResponseWriter, r *http.Request) {
 		backendPort := r.URL.Query().Get("backendPort")
@@ -126,7 +134,7 @@ func main() {
 		response["link"] = gatewayLink
 		response["label"] = label
 		response["clientID"] = "jetbrains-gateway"
-		response["kind"] = kind
+		response["kind"] = alias
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(response)
 	})
@@ -185,13 +193,33 @@ func resolveJsonLink(backendPort string) (string, error) {
 	return jsonResp.Projects[0].JoinLink, nil
 }
 
+func terminateIDE(backendPort string) error {
+	var (
+		hostStatusUrl = "http://localhost:" + backendPort + "/codeWithMe/unattendedHostStatus?token=gitpod&exit=true"
+		client        = http.Client{Timeout: 10 * time.Second}
+	)
+	resp, err := client.Get(hostStatusUrl)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	bodyBytes, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return xerrors.Errorf("failed to resolve terminate IDE: %s (%d)", bodyBytes, resp.StatusCode)
+	}
+	return nil
+}
+
 func resolveWorkspaceInfo(ctx context.Context) (*supervisor.ContentStatusResponse, *supervisor.WorkspaceInfoResponse, error) {
 	resolve := func(ctx context.Context) (contentStatus *supervisor.ContentStatusResponse, wsInfo *supervisor.WorkspaceInfoResponse, err error) {
 		supervisorAddr := os.Getenv("SUPERVISOR_ADDR")
 		if supervisorAddr == "" {
 			supervisorAddr = "localhost:22999"
 		}
-		supervisorConn, err := grpc.Dial(supervisorAddr, grpc.WithInsecure())
+		supervisorConn, err := grpc.Dial(supervisorAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
 			err = errors.New("dial supervisor failed: " + err.Error())
 			return
@@ -219,17 +247,79 @@ func resolveWorkspaceInfo(ctx context.Context) (*supervisor.ContentStatusRespons
 	return nil, nil, errors.New("failed with attempt 10 times")
 }
 
-func run(wsInfo *supervisor.WorkspaceInfoResponse) {
+func run(wsInfo *supervisor.WorkspaceInfoResponse, alias string) {
 	var args []string
 	args = append(args, "run")
 	args = append(args, wsInfo.GetCheckoutLocation())
-	cmd := exec.Command(RemoteDevServer, args...)
+	cmd := remoteDevServerCmd(args)
+	cmd.Env = append(cmd.Env, "JETBRAINS_GITPOD_BACKEND_KIND="+alias)
+	workspaceUrl, err := url.Parse(wsInfo.WorkspaceUrl)
+	if err == nil {
+		cmd.Env = append(cmd.Env, "JETBRAINS_GITPOD_WORKSPACE_HOST="+workspaceUrl.Hostname())
+	}
+	// Enable host status endpoint
+	cmd.Env = append(cmd.Env, "CWM_HOST_STATUS_OVER_HTTP_TOKEN=gitpod")
+
+	if err := cmd.Start(); err != nil {
+		log.WithError(err).Error("failed to start")
+	}
+
+	// Nicely handle SIGTERM sinal
+	go handleSignal(wsInfo.GetCheckoutLocation())
+
+	if err := cmd.Wait(); err != nil {
+		log.WithError(err).Error("failed to wait")
+	}
+	log.Info("IDE stopped, exiting")
+	os.Exit(cmd.ProcessState.ExitCode())
+}
+
+func remoteDevServerCmd(args []string) *exec.Cmd {
+	cmd := exec.Command(BackendPath+"/bin/remote-dev-server.sh", args...)
+	cmd.Env = os.Environ()
+
+	// Set default config and system directories under /workspace to preserve between restarts
+	qualifier := os.Getenv("JETBRAINS_BACKEND_QUALIFIER")
+	if qualifier == "stable" {
+		qualifier = ""
+	} else {
+		qualifier = "-" + qualifier
+	}
+	cmd.Env = append(cmd.Env,
+		fmt.Sprintf("IJ_HOST_CONFIG_BASE_DIR=/workspace/.config/JetBrains%s", qualifier),
+		fmt.Sprintf("IJ_HOST_SYSTEM_BASE_DIR=/workspace/.cache/JetBrains%s", qualifier),
+	)
+
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stdout
-	if err := cmd.Run(); err != nil {
-		log.WithError(err).Error("failed to run")
+	return cmd
+}
+
+func handleSignal(projectPath string) {
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	<-sigChan
+	log.WithField("port", defaultBackendPort).Info("receive SIGTERM signal, terminating IDE")
+	if err := terminateIDE(defaultBackendPort); err != nil {
+		log.WithError(err).Error("failed to terminate IDE")
 	}
-	os.Exit(cmd.ProcessState.ExitCode())
+	log.Info("asked IDE to terminate")
+}
+
+func configureXmx(alias string) error {
+	xmx := os.Getenv(strings.ToUpper(alias) + "_XMX")
+	if xmx == "" {
+		return nil
+	}
+	launcherPath := "/ide-desktop/backend/plugins/remote-dev-server/bin/launcher.sh"
+	content, err := ioutil.ReadFile(launcherPath)
+	if err != nil {
+		return err
+	}
+	// by default remote dev already set -Xmx2048m, see /ide-desktop/backend/plugins/remote-dev-server/bin/launcher.sh
+	newContent := strings.Replace(string(content), "-Xmx2048m", "-Xmx"+xmx, 1)
+	return ioutil.WriteFile(launcherPath, []byte(newContent), 0)
 }
 
 /**
@@ -274,8 +364,8 @@ func resolveBackendVersion() (*version.Version, error) {
 	return version.NewVersion(info.Version)
 }
 
-func installPlugins(wsInfo *supervisor.WorkspaceInfoResponse) error {
-	plugins, err := getPlugins(wsInfo.GetCheckoutLocation())
+func installPlugins(wsInfo *supervisor.WorkspaceInfoResponse, alias string) error {
+	plugins, err := getPlugins(wsInfo.GetCheckoutLocation(), alias)
 	if err != nil {
 		return err
 	}
@@ -299,8 +389,7 @@ func installPlugins(wsInfo *supervisor.WorkspaceInfoResponse) error {
 	args = append(args, "installPlugins")
 	args = append(args, wsInfo.GetCheckoutLocation())
 	args = append(args, plugins...)
-	cmd := exec.Command(RemoteDevServer, args...)
-	cmd.Stderr = os.Stderr
+	cmd := remoteDevServerCmd(args)
 	cmd.Stdout = io.MultiWriter(w, os.Stdout)
 	installErr := cmd.Run()
 
@@ -323,29 +412,49 @@ func installPlugins(wsInfo *supervisor.WorkspaceInfoResponse) error {
 	return nil
 }
 
-func getPlugins(repoRoot string) (plugins []string, err error) {
+func getPlugins(repoRoot string, alias string) ([]string, error) {
 	if repoRoot == "" {
-		err = errors.New("repoRoot is empty")
-		return
+		return nil, errors.New("repoRoot is empty")
 	}
 	data, err := os.ReadFile(filepath.Join(repoRoot, ".gitpod.yml"))
 	if err != nil {
 		// .gitpod.yml not exist is ok
 		if errors.Is(err, os.ErrNotExist) {
-			err = nil
-			return
+			return nil, nil
 		}
-		err = errors.New("read .gitpod.yml file failed: " + err.Error())
-		return
+		return nil, errors.New("read .gitpod.yml file failed: " + err.Error())
 	}
 	var config *gitpod.GitpodConfig
 	if err = yaml.Unmarshal(data, &config); err != nil {
-		err = errors.New("unmarshal .gitpod.yml file failed" + err.Error())
-		return
+		return nil, errors.New("unmarshal .gitpod.yml file failed" + err.Error())
 	}
+
 	if config == nil || config.JetBrains == nil {
-		err = errors.New("config.vscode field not exists")
-		return
+		return nil, nil
 	}
-	return config.JetBrains.Plugins, nil
+	var plugins []string
+	if config.JetBrains.Plugins != nil {
+		plugins = append(plugins, config.JetBrains.Plugins...)
+	}
+	productConfig := getProductConfig(config, alias)
+	if productConfig != nil && productConfig.Plugins != nil {
+		plugins = append(plugins, productConfig.Plugins...)
+	}
+	return plugins, nil
+}
+
+func getProductConfig(config *gitpod.GitpodConfig, alias string) *gitpod.JetBrainsProduct {
+	defer func() {
+		if err := recover(); err != nil {
+			log.WithField("error", err).WithField("alias", alias).Error("failed to extract JB product config")
+		}
+	}()
+	v := reflect.ValueOf(*config.JetBrains).FieldByNameFunc(func(s string) bool {
+		return strings.ToLower(s) == alias
+	}).Interface()
+	productConfig, ok := v.(*gitpod.JetBrainsProduct)
+	if !ok {
+		return nil
+	}
+	return productConfig
 }

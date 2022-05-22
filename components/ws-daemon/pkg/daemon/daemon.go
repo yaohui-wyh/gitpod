@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/xerrors"
@@ -16,8 +17,9 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/gitpod-io/gitpod/common-go/cgroups"
+	"github.com/gitpod-io/gitpod/common-go/log"
 	"github.com/gitpod-io/gitpod/ws-daemon/api"
+	"github.com/gitpod-io/gitpod/ws-daemon/pkg/cgroup"
 	"github.com/gitpod-io/gitpod/ws-daemon/pkg/container"
 	"github.com/gitpod-io/gitpod/ws-daemon/pkg/content"
 	"github.com/gitpod-io/gitpod/ws-daemon/pkg/cpulimit"
@@ -51,20 +53,36 @@ func NewDaemon(config Config, reg prometheus.Registerer) (*Daemon, error) {
 		return nil, err
 	}
 
-	listener := []dispatch.Listener{
-		cpulimit.NewDispatchListener(&config.Resources, reg),
-		markUnmountFallback,
-	}
-
-	unified, err := cgroups.IsUnifiedCgroupSetup()
+	cgroupV1IOLimiter, err := cgroup.NewIOLimiterV1(config.IOLimit.WriteBWPerSecond.Value(), config.IOLimit.ReadBWPerSecond.Value(), config.IOLimit.WriteIOPS, config.IOLimit.ReadIOPS)
 	if err != nil {
-		return nil, xerrors.Errorf("could not determine cgroup setup: %w", err)
+		return nil, err
 	}
 
-	listener = append(listener, NewCGroupCustomizer(config.Resources.CGroupBasePath, unified))
+	cgroupPlugins, err := cgroup.NewPluginHost(config.CPULimit.CGroupBasePath,
+		&cgroup.CacheReclaim{},
+		&cgroup.FuseDeviceEnablerV1{},
+		&cgroup.FuseDeviceEnablerV2{},
+		cgroupV1IOLimiter,
+		cgroup.NewIOLimiterV2(config.IOLimit.WriteBWPerSecond.Value(), config.IOLimit.ReadBWPerSecond.Value(), config.IOLimit.WriteIOPS, config.IOLimit.ReadIOPS),
+	)
+	if err != nil {
+		return nil, err
+	}
+	err = reg.Register(cgroupPlugins)
+	if err != nil {
+		return nil, xerrors.Errorf("cannot register cgroup plugin metrics: %w", err)
+	}
 
-	if !unified {
-		listener = append(listener, CacheReclaim(config.Resources.CGroupBasePath))
+	var configReloader CompositeConfigReloader
+	configReloader = append(configReloader, ConfigReloaderFunc(func(ctx context.Context, config *Config) error {
+		cgroupV1IOLimiter.Update(config.IOLimit.WriteBWPerSecond.Value(), config.IOLimit.ReadBWPerSecond.Value(), config.IOLimit.WriteIOPS, config.IOLimit.ReadIOPS)
+		return nil
+	}))
+
+	listener := []dispatch.Listener{
+		cpulimit.NewDispatchListener(&config.CPULimit, reg),
+		markUnmountFallback,
+		cgroupPlugins,
 	}
 
 	dsptch, err := dispatch.NewDispatch(containerRuntime, clientset, config.Runtime.KubernetesNamespace, nodename, listener...)
@@ -79,7 +97,7 @@ func NewDaemon(config Config, reg prometheus.Registerer) (*Daemon, error) {
 		containerRuntime,
 		dsptch.WorkspaceExistsOnNode,
 		&iws.Uidmapper{Config: config.Uidmapper, Runtime: containerRuntime},
-		config.Resources.CGroupBasePath,
+		config.CPULimit.CGroupBasePath,
 		reg,
 	)
 	if err != nil {
@@ -96,10 +114,11 @@ func NewDaemon(config Config, reg prometheus.Registerer) (*Daemon, error) {
 	return &Daemon{
 		Config: config,
 
-		dispatch:   dsptch,
-		content:    contentService,
-		diskGuards: dsk,
-		hosts:      hsts,
+		dispatch:       dsptch,
+		content:        contentService,
+		diskGuards:     dsk,
+		hosts:          hsts,
+		configReloader: configReloader,
 	}, nil
 }
 
@@ -129,10 +148,15 @@ func newClientSet(kubeconfig string) (res *kubernetes.Clientset, err error) {
 type Daemon struct {
 	Config Config
 
-	dispatch   *dispatch.Dispatch
-	content    *content.WorkspaceService
-	diskGuards []*diskguard.Guard
-	hosts      hosts.Controller
+	dispatch       *dispatch.Dispatch
+	content        *content.WorkspaceService
+	diskGuards     []*diskguard.Guard
+	hosts          hosts.Controller
+	configReloader ConfigReloader
+}
+
+func (d *Daemon) ReloadConfig(ctx context.Context, cfg *Config) error {
+	return d.configReloader.ReloadConfig(ctx, cfg)
 }
 
 // Start runs all parts of the daemon until stop is called
@@ -180,16 +204,24 @@ func (d *Daemon) Stop() error {
 func (d *Daemon) ReadinessProbe() func() error {
 	return func() error {
 		if d.hosts != nil && !d.hosts.DidUpdate() {
-			return fmt.Errorf("host controller not ready yet")
+			err := fmt.Errorf("host controller not ready yet")
+			log.WithError(err).Errorf("readiness probe failure")
+			return err
 		}
 
-		isContainerdReady, err := d.dispatch.Runtime.IsContainerdReady(context.Background())
+		// use 2 second timeout to ensure that IsContainerdReady() will not block indefinetely
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(2*time.Second))
+		defer cancel()
+		isContainerdReady, err := d.dispatch.Runtime.IsContainerdReady(ctx)
 		if err != nil {
+			log.WithError(err).Errorf("readiness probe failure: containerd error")
 			return fmt.Errorf("containerd error: %v", err)
 		}
 
 		if !isContainerdReady {
-			return fmt.Errorf("containerd is not ready")
+			err := fmt.Errorf("containerd is not ready")
+			log.WithError(err).Error("readiness probe failure")
+			return err
 		}
 
 		return nil

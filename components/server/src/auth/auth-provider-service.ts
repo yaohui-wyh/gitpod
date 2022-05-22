@@ -12,6 +12,8 @@ import { Config } from "../config";
 import { v4 as uuidv4 } from "uuid";
 import { oauthUrls as githubUrls } from "../github/github-urls";
 import { oauthUrls as gitlabUrls } from "../gitlab/gitlab-urls";
+import { oauthUrls as bbsUrls } from "../bitbucket-server/bitbucket-server-urls";
+import { oauthUrls as bbUrls } from "../bitbucket/bitbucket-urls";
 import { log } from "@gitpod/gitpod-protocol/lib/util/logging";
 
 @injectable()
@@ -49,6 +51,7 @@ export class AuthProviderService {
     protected toAuthProviderParams = (oap: AuthProviderEntry) =>
         <AuthProviderParams>{
             ...oap,
+            // HINT: host is expected to be lower case
             host: oap.host.toLowerCase(),
             verified: oap.status === "verified",
             builtin: false,
@@ -110,7 +113,21 @@ export class AuthProviderService {
     }
     protected initializeNewProvider(newEntry: AuthProviderEntry.NewEntry): AuthProviderEntry {
         const { host, type, clientId, clientSecret } = newEntry;
-        const urls = type === "GitHub" ? githubUrls(host) : type === "GitLab" ? gitlabUrls(host) : undefined;
+        let urls;
+        switch (type) {
+            case "GitHub":
+                urls = githubUrls(host);
+                break;
+            case "GitLab":
+                urls = gitlabUrls(host);
+                break;
+            case "BitbucketServer":
+                urls = bbsUrls(host);
+                break;
+            case "Bitbucket":
+                urls = bbUrls(host);
+                break;
+        }
         if (!urls) {
             throw new Error("Unexpected service type.");
         }

@@ -28,6 +28,7 @@ import { watchHeadlessLogs } from "../components/PrebuildLogs";
 import { getGitpodService, gitpodHostUrl } from "../service/service";
 import { StartPage, StartPhase, StartWorkspaceError } from "./StartPage";
 import ConnectToSSHModal from "../workspaces/ConnectToSSHModal";
+import Alert from "../components/Alert";
 const sessionId = v4();
 
 const WorkspaceLogs = React.lazy(() => import("../components/WorkspaceLogs"));
@@ -198,8 +199,11 @@ export default class StartWorkspace extends React.Component<StartWorkspaceProps,
                 throw new Error("No result!");
             }
             console.log("/start: started workspace instance: " + result.instanceID);
+
             // redirect to workspaceURL if we are not yet running in an iframe
             if (!this.props.runsInIFrame && result.workspaceURL) {
+                // before redirect, make sure we actually have the auth cookie set!
+                await this.ensureWorkspaceAuth(result.instanceID);
                 this.redirectTo(result.workspaceURL);
                 return;
             }
@@ -336,7 +340,7 @@ export default class StartWorkspace extends React.Component<StartWorkspaceProps,
             return;
         }
 
-        if (workspaceInstance.status.phase === "preparing") {
+        if (workspaceInstance.status.phase === "building" || workspaceInstance.status.phase == "preparing") {
             this.setState({ hasImageBuildLogs: true });
         }
 
@@ -391,16 +395,18 @@ export default class StartWorkspace extends React.Component<StartWorkspaceProps,
         let title = undefined;
         let statusMessage = !!error ? undefined : <p className="text-base text-gray-400">Preparing workspace …</p>;
         const contextURL = ContextURL.getNormalizedURL(this.state.workspace)?.toString();
+        const useLatest = !!this.state.workspaceInstance?.configuration?.ideConfig?.useLatest;
 
         switch (this.state?.workspaceInstance?.status.phase) {
             // unknown indicates an issue within the system in that it cannot determine the actual phase of
             // a workspace. This phase is usually accompanied by an error.
             case "unknown":
                 break;
-
             // Preparing means that we haven't actually started the workspace instance just yet, but rather
-            // are still preparing for launch. This means we're building the Docker image for the workspace.
+            // are still preparing for launch.
             case "preparing":
+            // Building means we're building the Docker image for the workspace.
+            case "building":
                 return <ImageBuildView workspaceId={this.state.workspaceInstance.workspaceId} />;
 
             // Pending means the workspace does not yet consume resources in the cluster, but rather is looking for
@@ -524,13 +530,19 @@ export default class StartWorkspace extends React.Component<StartWorkspaceProps,
                                     {openLinkLabel}
                                 </button>
                             </div>
-                            <div className="text-sm text-gray-400 dark:text-gray-500 mt-5">
-                                These IDE options are based on{" "}
-                                <a className="gp-link" href={gitpodHostUrl.asPreferences().toString()} target="_parent">
-                                    your user preferences
-                                </a>
-                                .
-                            </div>
+                            {!useLatest && (
+                                <Alert type="info" className="mt-4 w-96">
+                                    You can change the default editor for opening workspaces in{" "}
+                                    <a
+                                        className="gp-link"
+                                        target="_blank"
+                                        href={gitpodHostUrl.asPreferences().toString()}
+                                    >
+                                        user preferences
+                                    </a>
+                                    .
+                                </Alert>
+                            )}
                             {this.state.isSSHModalVisible === true && this.state.ownerToken && (
                                 <ConnectToSSHModal
                                     workspaceId={this.props.workspaceId}
@@ -633,9 +645,8 @@ export default class StartWorkspace extends React.Component<StartWorkspaceProps,
                 );
                 break;
         }
-
         return (
-            <StartPage phase={phase} error={error} title={title}>
+            <StartPage phase={phase} error={error} title={title} showLatestIdeWarning={useLatest}>
                 {statusMessage}
             </StartPage>
         );

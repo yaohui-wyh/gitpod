@@ -182,18 +182,17 @@ func LaunchWorkspaceDirectly(ctx context.Context, api *ComponentAPI, opts ...Lau
 
 	wsm, err := api.WorkspaceManager()
 	if err != nil {
-		return nil, xerrors.Errorf("cannot start workspace: %q", err)
+		return nil, xerrors.Errorf("cannot start workspace manager: %q", err)
 	}
 
 	sresp, err := wsm.StartWorkspace(sctx, req)
-	scancel()
 	if err != nil {
 		return nil, xerrors.Errorf("cannot start workspace: %q", err)
 	}
 
 	lastStatus, err := WaitForWorkspaceStart(ctx, instanceID.String(), api, options.WaitForOpts...)
 	if err != nil {
-		return nil, xerrors.Errorf("cannot start workspace: %q", err)
+		return nil, xerrors.Errorf("cannot wait for workspace start: %q", err)
 	}
 
 	// it.t.Logf("workspace is running: instanceID=%s", instanceID.String())

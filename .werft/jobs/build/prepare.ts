@@ -5,6 +5,7 @@ import * as VM from '../../vm/vm'
 import { CORE_DEV_KUBECONFIG_PATH, GCLOUD_SERVICE_ACCOUNT_PATH, HARVESTER_KUBECONFIG_PATH } from "./const";
 import { issueMetaCerts } from './deploy-to-preview-environment';
 import { JobConfig } from './job-config';
+import * as Manifests from '../../vm/manifests';
 
 const phaseName = "prepare";
 const prepareSlices = {
@@ -17,28 +18,17 @@ export async function prepare(werft: Werft, config: JobConfig) {
     werft.phase(phaseName);
     try {
         werft.log(prepareSlices.CONFIGURE_CORE_DEV, prepareSlices.CONFIGURE_CORE_DEV)
-        compareWerftAndGitpodImage()
         activateCoreDevServiceAccount()
         configureDocker()
         configureStaticClustersAccess()
         werft.done(prepareSlices.CONFIGURE_CORE_DEV)
 
-        issueCertificate(werft, config)
+        await issueCertificate(werft, config)
         decideHarvesterVMCreation(werft, config)
     } catch (err) {
         werft.fail(phaseName, err);
     }
     werft.done(phaseName);
-}
-
-// We want to assure that our Workspace behaves the exactly same way as
-// it behaves when running a werft job. Therefore, we want them to always be equal.
-function compareWerftAndGitpodImage() {
-    const werftImg = exec("cat .werft/build.yaml | grep dev-environment", { silent: true }).trim().split(": ")[1];
-    const devImg = exec("yq r .gitpod.yml image", { silent: true }).trim();
-    if (werftImg !== devImg) {
-        throw new Error(`Werft job image (${werftImg}) and Gitpod dev image (${devImg}) do not match`);
-    }
 }
 
 function activateCoreDevServiceAccount() {
@@ -71,12 +61,12 @@ function configureStaticClustersAccess() {
     }
 }
 
-function issueCertificate(werft: Werft, config: JobConfig) {
+async function issueCertificate(werft: Werft, config: JobConfig) {
     const certName = config.withVM ? `harvester-${previewNameFromBranchName(config.repository.branch)}` : `staging-${previewNameFromBranchName(config.repository.branch)}`
     const domain = config.withVM ? `${config.previewEnvironment.destname}.preview.gitpod-dev.com` : `${config.previewEnvironment.destname}.staging.gitpod-dev.com`;
 
     werft.log(prepareSlices.ISSUE_CERTIFICATES, prepareSlices.ISSUE_CERTIFICATES)
-    issueMetaCerts(werft, certName, "certs", domain, config.withVM, prepareSlices.ISSUE_CERTIFICATES)
+    await issueMetaCerts(werft, certName, "certs", domain, config.withVM, prepareSlices.ISSUE_CERTIFICATES)
     werft.done(prepareSlices.ISSUE_CERTIFICATES)
 }
 
@@ -85,6 +75,9 @@ function decideHarvesterVMCreation(werft: Werft, config: JobConfig) {
         createVM(werft, config)
     } else {
         werft.currentPhaseSpan.setAttribute("werft.harvester.created_vm", false)
+    }
+    if (config.withVM) {
+        applyLoadBalancer({ name: config.previewEnvironment.destname })
     }
     werft.done(prepareSlices.BOOT_VM)
 }
@@ -107,4 +100,17 @@ function createVM(werft: Werft, config: JobConfig) {
     werft.log(prepareSlices.BOOT_VM, 'Creating  VM')
     VM.startVM({ name: config.previewEnvironment.destname })
     werft.currentPhaseSpan.setAttribute("werft.harvester.created_vm", true)
+}
+
+function applyLoadBalancer(option: { name: string }) {
+    const namespace = `preview-${option.name}`;
+    function kubectlApplyManifest(manifest: string, options?: { validate?: boolean }) {
+        exec(`
+            cat <<EOF | kubectl --kubeconfig ${CORE_DEV_KUBECONFIG_PATH} apply --validate=${!!options?.validate} -f -
+${manifest}
+EOF
+        `);
+    }
+    kubectlApplyManifest(Manifests.LBDeployManifest({ name: option.name }));
+    kubectlApplyManifest(Manifests.LBServiceManifest({ name: option.name }));
 }

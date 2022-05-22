@@ -49,6 +49,9 @@ func HostBasedRouter(header, wsHostSuffix string, wsHostSuffixRegex string) Work
 			allClusterWsHostSuffixRegex = wsHostSuffix
 		}
 
+		// make sure acme router is the first handler setup to make sure it has a chance to catch acme challenge
+		setupAcmeRouter(r)
+
 		var (
 			getHostHeader = func(req *http.Request) string {
 				host := req.Header.Get(header)
@@ -63,8 +66,6 @@ func HostBasedRouter(header, wsHostSuffix string, wsHostSuffixRegex string) Work
 			portRouter      = r.MatcherFunc(matchWorkspaceHostHeader(wsHostSuffix, getHostHeader, true)).Subrouter()
 			ideRouter       = r.MatcherFunc(matchWorkspaceHostHeader(allClusterWsHostSuffixRegex, getHostHeader, false)).Subrouter()
 		)
-
-		setupAcmeRouter(r)
 
 		r.NotFoundHandler = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			hostname := getHostHeader(req)
@@ -84,8 +85,10 @@ func matchWorkspaceHostHeader(wsHostSuffix string, headerProvider hostHeaderProv
 	}
 
 	r := regexp.MustCompile("^" + regexPrefix + wsHostSuffix)
-	foreignContentHostR := regexp.MustCompile("^(.+)(?:foreign)" + wsHostSuffix)
+
+	// REMOVE this once all workspaces have updated to new vscode version
 	foreignContentHost2R := regexp.MustCompile("^((?:v--)?[0-9a-v]+)" + wsHostSuffix)
+
 	foreignContentPathR := regexp.MustCompile("^/" + regexPrefix + "(/.*)")
 	return func(req *http.Request, m *mux.RouteMatch) bool {
 		hostname := headerProvider(req)
@@ -94,21 +97,23 @@ func matchWorkspaceHostHeader(wsHostSuffix string, headerProvider hostHeaderProv
 		}
 
 		var workspaceID, workspacePort, foreignOrigin, foreignPath string
-		matches := foreignContentHostR.FindStringSubmatch(hostname)
-		if len(matches) == 0 {
-			matches = foreignContentHost2R.FindStringSubmatch(hostname)
-		}
+		matches := foreignContentHost2R.FindStringSubmatch(hostname)
 		if len(matches) == 2 {
 			foreignOrigin = matches[1]
+			if strings.Contains(req.URL.Path, "/__files__/") {
+				// REMOVE this once all workspaces have updated to new vscode version
+				// Don't match if path contains `/__files__/` (blobserve image separator)
+				return false
+			}
 			matches = foreignContentPathR.FindStringSubmatch(req.URL.Path)
 			if matchPort {
 				if len(matches) < 4 {
 					return false
 				}
-				// https://extensions-foreign.ws-eu10.gitpod.io/3000-coral-dragon-ilr0r6eq/index.html
+				// https://0d9rkrj560blqb5s07q431ru9mhg19k1k4bqgd1dbprtgmt7vuhk.ws-eu10.gitpod.io/3000-coral-dragon-ilr0r6eq/index.html
 				// workspaceID: coral-dragon-ilr0r6eq
 				// workspacePort: 3000
-				// foreignOrigin: extensions-
+				// foreignOrigin: 0d9rkrj560blqb5s07q431ru9mhg19k1k4bqgd1dbprtgmt7vuhk
 				// foreignPath: /index.html
 				workspaceID = matches[2]
 				workspacePort = matches[1]
@@ -117,10 +122,10 @@ func matchWorkspaceHostHeader(wsHostSuffix string, headerProvider hostHeaderProv
 				if len(matches) < 3 {
 					return false
 				}
-				// https://extensions-foreign.ws-eu10.gitpod.io/coral-dragon-ilr0r6eq/index.html
+				// https://0d9rkrj560blqb5s07q431ru9mhg19k1k4bqgd1dbprtgmt7vuhk.ws-eu10.gitpod.io/coral-dragon-ilr0r6eq/index.html
 				// workspaceID: coral-dragon-ilr0r6eq
 				// workspacePort:
-				// foreignOrigin: extensions-
+				// foreignOrigin: 0d9rkrj560blqb5s07q431ru9mhg19k1k4bqgd1dbprtgmt7vuhk
 				// foreignPath: /index.html
 				workspaceID = matches[1]
 				foreignPath = matches[2]
@@ -179,6 +184,7 @@ func matchWorkspaceHostHeader(wsHostSuffix string, headerProvider hostHeaderProv
 
 func matchBlobserveHostHeader(wsHostSuffix string, headerProvider hostHeaderProvider) mux.MatcherFunc {
 	r := regexp.MustCompile("^blobserve" + wsHostSuffix)
+	r2 := regexp.MustCompile("^(?:v--)?[0-9a-v]+" + wsHostSuffix)
 	return func(req *http.Request, m *mux.RouteMatch) bool {
 		hostname := headerProvider(req)
 		if hostname == "" {
@@ -186,7 +192,18 @@ func matchBlobserveHostHeader(wsHostSuffix string, headerProvider hostHeaderProv
 		}
 
 		matches := r.FindStringSubmatch(hostname)
-		return len(matches) >= 1
+		if len(matches) >= 1 {
+			return true
+		}
+
+		matches = r2.FindStringSubmatch(hostname)
+		if len(matches) >= 1 && strings.Contains(req.URL.Path, "/__files__/") {
+			// Check if path contains `/__files__/` for now as it could be using an
+			// old vscode version serving webview resources from workspace
+			return true
+		}
+
+		return false
 	}
 }
 
