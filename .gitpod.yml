@@ -75,3 +75,5 @@ jetbrains:
   goland:
     prebuilds:
       version: stable
+  intellij:
+    vmoptions: "-Xmx4000m"
