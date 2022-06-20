@@ -76,9 +76,10 @@ func main() {
 	}
 	log.WithField("cost", time.Now().Local().Sub(startTime).Milliseconds()).Info("content available")
 
+	repoRoot := wsInfo.GetCheckoutLocation()
 	version_2022_1, _ := version.NewVersion("2022.1")
 	if version_2022_1.LessThanOrEqual(backendVersion) {
-		err = installPlugins(wsInfo, alias)
+		err = installPlugins(repoRoot, alias)
 		installPluginsCost := time.Now().Local().Sub(startTime).Milliseconds()
 		if err != nil {
 			log.WithError(err).WithField("cost", installPluginsCost).Error("installing repo plugins: done")
@@ -87,7 +88,7 @@ func main() {
 		}
 	}
 
-	err = configureVMOptions(alias)
+	err = configureVMOptions(repoRoot, alias)
 	if err != nil {
 		log.WithError(err).Error("failed to configure vmoptions")
 	}
@@ -307,7 +308,7 @@ func handleSignal(projectPath string) {
 	log.Info("asked IDE to terminate")
 }
 
-func configureVMOptions(alias string) error {
+func configureVMOptions(repoRoot string, alias string) error {
 	idePrefix := alias
 	if alias == "intellij" {
 		idePrefix = "idea"
@@ -318,7 +319,7 @@ func configureVMOptions(alias string) error {
 	if err != nil {
 		return err
 	}
-	newContent := updateVMOptions(alias, string(content))
+	newContent := updateVMOptions(repoRoot, alias, string(content))
 	return ioutil.WriteFile(path, []byte(newContent), 0)
 }
 
@@ -340,7 +341,7 @@ func deduplicateVMOption(oldLines []string, newLines []string, predicate func(l,
 	return result
 }
 
-func updateVMOptions(alias string, content string) string {
+func updateVMOptions(repoRoot string, alias string, content string) string {
 	// inspired by how intellij platform merge the VMOptions
 	// https://github.com/JetBrains/intellij-community/blob/master/platform/platform-impl/src/com/intellij/openapi/application/ConfigImportHelper.java#L1115
 	filterFunc := func(l, r string) bool {
@@ -358,12 +359,25 @@ func updateVMOptions(alias string, content string) string {
 	gitpodVMOptions := []string{"-Dgtw.disable.exit.dialog=true"}
 	vmoptions := deduplicateVMOption(ideaVMOptionsLines, gitpodVMOptions, filterFunc)
 
-	// user-defined vmoptions
+	// user-defined vmoptions (EnvVar)
 	userVMOptionsVar := os.Getenv(strings.ToUpper(alias) + "_VMOPTIONS")
 	userVMOptions := strings.Fields(userVMOptionsVar)
 	if len(userVMOptions) > 0 {
 		vmoptions = deduplicateVMOption(vmoptions, userVMOptions, filterFunc)
 	}
+
+	// user-defined vmoptions (.gitpod.yml)
+	gitpodConfig, err := parseGitpodConfig(repoRoot)
+	if gitpodConfig != nil && err == nil {
+		productConfig := getProductConfig(gitpodConfig, alias)
+		if productConfig != nil {
+			userVMOptions = strings.Fields(productConfig.VMOptions)
+			if len(userVMOptions) > 0 {
+				vmoptions = deduplicateVMOption(vmoptions, userVMOptions, filterFunc)
+			}
+		}
+	}
+
 	// vmoptions file should end with a newline
 	return strings.Join(vmoptions, "\n") + "\n"
 }
@@ -410,8 +424,8 @@ func resolveBackendVersion() (*version.Version, error) {
 	return version.NewVersion(info.Version)
 }
 
-func installPlugins(wsInfo *supervisor.WorkspaceInfoResponse, alias string) error {
-	plugins, err := getPlugins(wsInfo.GetCheckoutLocation(), alias)
+func installPlugins(repoRoot string, alias string) error {
+	plugins, err := getPlugins(repoRoot, alias)
 	if err != nil {
 		return err
 	}
@@ -433,7 +447,7 @@ func installPlugins(wsInfo *supervisor.WorkspaceInfoResponse, alias string) erro
 
 	var args []string
 	args = append(args, "installPlugins")
-	args = append(args, wsInfo.GetCheckoutLocation())
+	args = append(args, repoRoot)
 	args = append(args, plugins...)
 	cmd := remoteDevServerCmd(args)
 	cmd.Stdout = io.MultiWriter(w, os.Stdout)
@@ -458,7 +472,7 @@ func installPlugins(wsInfo *supervisor.WorkspaceInfoResponse, alias string) erro
 	return nil
 }
 
-func getPlugins(repoRoot string, alias string) ([]string, error) {
+func parseGitpodConfig(repoRoot string) (*gitpod.GitpodConfig, error) {
 	if repoRoot == "" {
 		return nil, errors.New("repoRoot is empty")
 	}
@@ -474,11 +488,18 @@ func getPlugins(repoRoot string, alias string) ([]string, error) {
 	if err = yaml.Unmarshal(data, &config); err != nil {
 		return nil, errors.New("unmarshal .gitpod.yml file failed" + err.Error())
 	}
+	return config, nil
+}
 
+func getPlugins(repoRoot string, alias string) ([]string, error) {
+	var plugins []string
+	config, err := parseGitpodConfig(repoRoot)
+	if err != nil {
+		return nil, err
+	}
 	if config == nil || config.JetBrains == nil {
 		return nil, nil
 	}
-	var plugins []string
 	if config.JetBrains.Plugins != nil {
 		plugins = append(plugins, config.JetBrains.Plugins...)
 	}

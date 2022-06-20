@@ -287,6 +287,10 @@
                                     "description": "Whether only stable, latest or both versions should be warmed up. Default is stable only."
                                 }
                             }
+                        },
+                        "vmoptions": {
+                            "type": "string",
+                            "description": "Adjust VM options for the remote IDE server, especially if you want to increase the '-Xmx' memory size when working with a larger project. See https://www.jetbrains.com/help/idea/tuning-the-ide.html#configure-jvm-options"
                         }
                     }
                 },
@@ -317,6 +321,10 @@
                                     "description": "Whether only stable, latest or both versions should be warmed up. Default is stable only."
                                 }
                             }
+                        },
+                        "vmoptions": {
+                            "type": "string",
+                            "description": "Adjust VM options for the remote IDE server, especially if you want to increase the '-Xmx' memory size when working with a larger project. See https://www.jetbrains.com/help/idea/tuning-the-ide.html#configure-jvm-options"
                         }
                     }
                 },
@@ -347,6 +355,10 @@
                                     "description": "Whether only stable, latest or both versions should be warmed up. Default is stable only."
                                 }
                             }
+                        },
+                        "vmoptions": {
+                            "type": "string",
+                            "description": "Adjust VM options for the remote IDE server, especially if you want to increase the '-Xmx' memory size when working with a larger project. See https://www.jetbrains.com/help/idea/tuning-the-ide.html#configure-jvm-options"
                         }
                     }
                 },
@@ -377,6 +389,10 @@
                                     "description": "Whether only stable, latest or both versions should be warmed up. Default is stable only."
                                 }
                             }
+                        },
+                        "vmoptions": {
+                            "type": "string",
+                            "description": "Adjust VM options for the remote IDE server, especially if you want to increase the '-Xmx' memory size when working with a larger project. See https://www.jetbrains.com/help/idea/tuning-the-ide.html#configure-jvm-options"
                         }
                     }
                 }
